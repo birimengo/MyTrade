@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/*
+  This is the correct way to configure the 'dark' variant in Tailwind CSS v4.
+  It tells Tailwind to apply 'dark:' prefixed classes whenever the '.dark' class
+  is present on an element or its ancestor.
+*/
+/* The following line is ignored by the CSS linter to prevent an 'unknown at-rule' error */
+/* stylelint-disable-next-line at-rule-no-unknown */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Define your CSS variables for a custom theme, if desired. */
+:root {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-primary: #3b82f6;
+  --color-secondary: #64748b;
+  --color-border: #e5e7eb;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+}
+
+html.dark {
+  --color-background: #0a0a0a;
+  --color-foreground: #ededed;
+  --color-primary: #60a5fa;
+  --color-secondary: #94a3b8;
+  --color-border: #374151;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+}
+
+/* Apply base styles */
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}

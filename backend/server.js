@@ -70,13 +70,16 @@ const connectDB = async () => {
     
     console.log('MongoDB URI:', process.env.MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@')); // Hide credentials in logs
     
+    // Updated connection options for Mongoose 7+ - removed deprecated options
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+      // Remove deprecated options that cause errors in newer Mongoose versions
+      // useNewUrlParser: true,      // No longer needed in Mongoose 6+
+      // useUnifiedTopology: true,   // No longer needed in Mongoose 6+
+      // bufferMaxEntries: 0,        // Deprecated - remove this line
       serverSelectionTimeoutMS: 30000, // Increased timeout
       socketTimeoutMS: 45000,
-      bufferCommands: false,
-      bufferMaxEntries: 0
+      // Keep bufferCommands if needed, but remove deprecated options
+      bufferCommands: false
     });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
@@ -100,6 +103,7 @@ const connectDB = async () => {
     console.log('2. Verify your MongoDB Atlas cluster is running');
     console.log('3. Check if your IP is whitelisted in MongoDB Atlas');
     console.log('4. Verify network connectivity to MongoDB servers');
+    console.log('5. Remove deprecated Mongoose connection options (useNewUrlParser, useUnifiedTopology, bufferMaxEntries)');
     
     return false;
   }

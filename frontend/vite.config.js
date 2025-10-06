@@ -5,6 +5,23 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [
     react(),
-    tailwindcss(), // Simple Tailwind v4 integration
+    tailwindcss(),
   ],
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['@mui/material', '@mui/icons-material', '@chakra-ui/react']
+        }
+      }
+    }
+  },
+  server: {
+    port: 5173,
+    host: true
+  }
 })

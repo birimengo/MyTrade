@@ -11,17 +11,11 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 1600,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          ui: ['@mui/material', '@mui/icons-material', '@chakra-ui/react']
-        }
-      }
-    }
   },
   server: {
     port: 5173,
     host: true
-  }
+  },
+  // Remove base: './' or set it to empty for absolute paths
+  base: ''
 })

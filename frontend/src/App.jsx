@@ -16,6 +16,56 @@ import ProtectedRoute from './components/ProtectedRoute';
 import WholesalerProducts from './components/RetailerComponents/WholesalerProducts';
 import SupplierWholesalersProducts from './components/WholesalerComponents/SupplierWholesalersProducts';
 
+// Import your API config
+import { API_BASE_URL, SOCKET_SERVER } from './config/api';
+
+// 🚀 GLOBAL URL TRANSFORMATION
+const originalFetch = window.fetch;
+
+window.fetch = function(url, options) {
+  let finalUrl = url;
+  
+  // Transform HTTP URLs from localhost to production
+  if (typeof url === 'string' && url.includes('http://localhost:5000')) {
+    if (API_BASE_URL && !API_BASE_URL.includes('localhost')) {
+      finalUrl = url.replace('http://localhost:5000', API_BASE_URL);
+      console.log(`🌐 Auto-transformed: ${url} → ${finalUrl}`);
+    } else {
+      console.log(`🔧 Development mode: Using ${url}`);
+    }
+  }
+  
+  return originalFetch.call(this, finalUrl, options);
+};
+
+// 🚀 WebSocket URL Transformation
+const originalWebSocket = window.WebSocket;
+
+window.WebSocket = function(url, protocols) {
+  let finalUrl = url;
+  
+  // Transform WebSocket URLs
+  if (typeof url === 'string' && url.includes('ws://localhost:5000')) {
+    if (SOCKET_SERVER && !SOCKET_SERVER.includes('localhost')) {
+      const wsUrl = SOCKET_SERVER.replace('http', 'ws').replace('https', 'wss');
+      finalUrl = url.replace('ws://localhost:5000', wsUrl);
+      console.log(`🌐 WebSocket transformed: ${url} → ${finalUrl}`);
+    }
+  }
+  
+  return new originalWebSocket(finalUrl, protocols);
+};
+
+// Enhanced logging
+console.log('=== ENVIRONMENT DEBUG INFO ===');
+console.log('VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
+console.log('VITE_SOCKET_SERVER:', import.meta.env.VITE_SOCKET_SERVER);
+console.log('API_BASE_URL from config:', API_BASE_URL);
+console.log('SOCKET_SERVER from config:', SOCKET_SERVER);
+console.log('Current hostname:', window.location.hostname);
+console.log('Environment:', API_BASE_URL && !API_BASE_URL.includes('localhost') ? 'PRODUCTION' : 'DEVELOPMENT');
+console.log('==============================');
+
 function App() {
   return (
     <DarkModeProvider>

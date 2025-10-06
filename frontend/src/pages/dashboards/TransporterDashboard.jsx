@@ -35,7 +35,11 @@ import Earnings from '../../components/TransporterComponents/Earnings';
 import Settings from '../../components/Settings';
 import TransporterOrders from '../../components/TransporterComponents/TransporterOrders';
 import SupplierOrders from '../../components/TransporterComponents/SupplierOrders';
-import Overview from '../../components/TransporterComponents/Overview'; // Import the Overview component
+import OverView from '../../components/TransporterComponents/OverView'; // Fixed import - capital V
+
+// API base URL from environment variables
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const SOCKET_SERVER = import.meta.env.VITE_SOCKET_SERVER || 'http://localhost:5000';
 
 const TransporterDashboard = () => {
   const { user } = useAuth();
@@ -50,23 +54,47 @@ const TransporterDashboard = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io('http://localhost:5000');
+    // Initialize socket connection with environment variable
+    const newSocket = io(SOCKET_SERVER, {
+      transports: ['websocket', 'polling'],
+      withCredentials: true
+    });
+    
     setSocket(newSocket);
+
+    // Socket event handlers
+    newSocket.on('connect', () => {
+      console.log('Connected to server');
+    });
+
+    newSocket.on('disconnect', () => {
+      console.log('Disconnected from server');
+    });
 
     // Join user's room
     if (user) {
       newSocket.emit('join', user._id);
     }
 
-    return () => newSocket.close();
+    return () => {
+      newSocket.off('connect');
+      newSocket.off('disconnect');
+      newSocket.close();
+    };
   }, [user]);
 
   // Fetch transporter's active status on component mount
   useEffect(() => {
     const fetchTransporterStatus = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/transporters/status/${user._id}`);
+        const response = await fetch(`${API_BASE_URL}/api/transporters/status/${user._id}`, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
         
         if (data.success) {
@@ -111,7 +139,7 @@ const TransporterDashboard = () => {
   const toggleActiveStatus = async () => {
     setLoadingStatus(true);
     try {
-      const response = await fetch('http://localhost:5000/api/transporters/toggle-status', {
+      const response = await fetch(`${API_BASE_URL}/api/transporters/toggle-status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -120,12 +148,25 @@ const TransporterDashboard = () => {
           transporterId: user._id,
           isActive: !isActive
         }),
+        credentials: 'include'
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
       
       if (data.success) {
         setIsActive(!isActive);
+        // Notify other users via socket
+        if (socket) {
+          socket.emit('transporterStatusUpdate', {
+            transporterId: user._id,
+            isActive: !isActive,
+            transporterName: `${user.firstName} ${user.lastName}`
+          });
+        }
       } else {
         console.error('Failed to update status:', data.message);
       }
@@ -139,6 +180,7 @@ const TransporterDashboard = () => {
   const roleSpecificItems = {
     title: 'Transporter Portal',
     items: [
+      { id: 'overview', label: 'Overview', icon: <FaMapMarkerAlt /> },
       { id: 'deliveries', label: 'Deliveries', icon: <FaTruck /> },
       { id: 'vehicles', label: 'Vehicles', icon: <FaShippingFast /> },
       { id: 'routes', label: 'Routes', icon: <FaRoute /> },
@@ -147,6 +189,7 @@ const TransporterDashboard = () => {
       { id: 'w-orders', label: 'W-Orders', icon: <FaClipboardList /> },
       { id: 's-orders', label: 'S-Orders', icon: <FaBox /> },
       { id: 'chat', label: 'Chat', icon: <FaComments /> },
+      { id: 'settings', label: 'Settings', icon: <FaTools /> },
     ]
   };
 
@@ -206,7 +249,7 @@ const TransporterDashboard = () => {
   const handleSelectConversation = async (selectedUser) => {
     try {
       // Create or get conversation
-      const response = await fetch('http://localhost:5000/api/conversations', {
+      const response = await fetch(`${API_BASE_URL}/api/conversations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -215,7 +258,12 @@ const TransporterDashboard = () => {
           participantId: selectedUser._id,
           userId: user._id
         }),
+        credentials: 'include'
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
       
@@ -234,7 +282,7 @@ const TransporterDashboard = () => {
   const renderContent = () => {
     return (
       <Routes>
-        <Route path="/" element={<Overview />} />
+        <Route path="/" element={<OverView />} />
         <Route path="/deliveries" element={<Deliveries />} />
         <Route path="/vehicles" element={<Vehicles />} />
         <Route path="/routes" element={<RoutesComponent />} />
@@ -317,15 +365,18 @@ const TransporterDashboard = () => {
               <button
                 onClick={toggleActiveStatus}
                 disabled={loadingStatus}
-                className={`flex items-center px-3 py-1.5 rounded-full text-sm font-medium ${
+                className={`flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200 ${
                   isActive 
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
-                    : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-800' 
+                    : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
                 aria-label={isActive ? "Set as inactive" : "Set as active"}
               >
                 {loadingStatus ? (
-                  <span>Updating...</span>
+                  <span className="flex items-center">
+                    <FaClock className="h-3 w-3 mr-1 animate-spin" />
+                    Updating...
+                  </span>
                 ) : (
                   <>
                     {isActive ? (
@@ -341,7 +392,7 @@ const TransporterDashboard = () => {
               {/* Dark Mode Toggle Button */}
               <button
                 onClick={toggleDarkMode}
-                className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
                 aria-label="Toggle dark mode"
               >
                 {isDarkMode ? (
@@ -351,8 +402,10 @@ const TransporterDashboard = () => {
                 )}
               </button>
               
-              <span className="text-sm text-gray-700 dark:text-gray-300">Welcome, {user?.firstName}</span>
-              <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center text-white text-sm">
+              <span className="text-sm text-gray-700 dark:text-gray-300 hidden sm:inline">
+                Welcome, {user?.firstName}
+              </span>
+              <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center text-white text-sm font-medium shadow-sm">
                 {user?.firstName?.charAt(0)}
               </div>
             </div>
@@ -374,7 +427,7 @@ const TransporterDashboard = () => {
           {/* Overlay for mobile when sidebar is open */}
           {isSidebarOpen && (
             <div 
-              className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+              className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden transition-opacity duration-300"
               onClick={handleCloseSidebar}
             />
           )}

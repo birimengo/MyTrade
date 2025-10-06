@@ -6,6 +6,13 @@ const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const path = require('path');
 
+// Debug environment variables
+console.log('Environment Variables Check:');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('MONGODB_URI:', process.env.MONGODB_URI ? '✓ Loaded' : '✗ NOT LOADED');
+console.log('PORT:', process.env.PORT);
+console.log('CLOUDINARY_URL:', process.env.CLOUDINARY_URL ? '✓ Loaded' : '✗ NOT LOADED');
+
 // Import models FIRST to ensure they're registered
 const User = require('./models/User');
 const Conversation = require('./models/Conversation');
@@ -20,12 +27,11 @@ const messageRoutes = require('./routes/messages');
 const wholesalerRoutes = require('./routes/wholesalers');
 const retailerRoutes = require('./routes/retailers');
 const productRoutes = require('./routes/products');
-const transporterRoutes = require('./routes/transporters'); // ADDED
+const transporterRoutes = require('./routes/transporters');
 const retailerSalesRoutes = require('./routes/retailerSales');
 const retailerReceiptRoutes = require('./routes/retailerReceipt');
 const supplierOrdersRoutes = require('./routes/supplierOrdersRoute');
 const supplierSalesRoutes = require('./routes/supplierSales');
-
 const systemStockRoutes = require('./routes/systemStock');
 const retailerStockRoutes = require('./routes/retailerStock');
 const supplierProductsRoutes = require('./routes/supplierProducts');
@@ -52,29 +58,48 @@ const { handleSocketConnection } = require('./socket/socketHandler');
 // Import Cloudinary configuration
 require('./config/cloudinary');
 
-// Connect to database with better error handling
+// Enhanced database connection with better error handling and debugging
 const connectDB = async () => {
   try {
     console.log('Attempting to connect to MongoDB...');
     
+    // Validate MONGODB_URI exists
+    if (!process.env.MONGODB_URI) {
+      throw new Error('MONGODB_URI is not defined in environment variables. Please check your .env file or Render environment variables.');
+    }
+    
+    console.log('MongoDB URI:', process.env.MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@')); // Hide credentials in logs
+    
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 30000, // Increased timeout
       socketTimeoutMS: 45000,
+      bufferCommands: false,
+      bufferMaxEntries: 0
     });
 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-    console.log(`Database Name: ${conn.connection.name}`);
+    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    console.log(`📊 Database Name: ${conn.connection.name}`);
+    console.log(`🎯 Connection State: ${conn.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
+    
     return true;
   } catch (error) {
-    console.error('Database connection error:', error.message);
+    console.error('❌ Database connection error:', error.message);
     
     if (error.name === 'MongoNetworkError') {
-      console.log('Network error. Please check your internet connection.');
+      console.log('🔌 Network error. Please check your internet connection and MongoDB Atlas whitelist settings.');
     } else if (error.name === 'MongooseServerSelectionError') {
-      console.log('Cannot connect to MongoDB server. Check your connection string.');
+      console.log('🌐 Cannot connect to MongoDB server. Check your connection string and network access.');
+    } else if (error.name === 'MongoParseError') {
+      console.log('🔗 MongoDB connection string is malformed. Please check your MONGODB_URI.');
     }
+    
+    console.log('💡 Troubleshooting tips:');
+    console.log('1. Check if MONGODB_URI is correctly set in Render environment variables');
+    console.log('2. Verify your MongoDB Atlas cluster is running');
+    console.log('3. Check if your IP is whitelisted in MongoDB Atlas');
+    console.log('4. Verify network connectivity to MongoDB servers');
     
     return false;
   }
@@ -82,37 +107,49 @@ const connectDB = async () => {
 
 const app = express();
 const server = http.createServer(app);
+
+// Enhanced CORS configuration for production
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173', 
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'https://my-trade.vercel.app', // Your Vercel frontend
+  'https://mytrade-cx5z.onrender.com' // Your Render backend (for API calls between services)
+];
+
 const io = socketIo(server, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
   }
 });
 
 const PORT = process.env.PORT || 5000;
 
-// Enhanced CORS configuration
+// Enhanced CORS configuration with production support
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, postman, etc.)
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173'
-    ];
     
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
+      console.log('CORS blocked for origin:', origin);
       return callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Increase payload size limit for file uploads
 app.use(express.json({ limit: '50mb' }));
@@ -123,7 +160,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/auth', authControllerRoutes); // Add password reset routes
+app.use('/api/auth', authControllerRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
@@ -131,7 +168,7 @@ app.use('/api/wholesalers', wholesalerRoutes);
 app.use('/api/retailers', retailerRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/retailer-orders', retailerOrderRoutes);
-app.use('/api/transporters', transporterRoutes); // ADDED
+app.use('/api/transporters', transporterRoutes);
 app.use('/api/retailer-sales', retailerSalesRoutes);
 app.use('/api/retailer-receipts', retailerReceiptRoutes);
 app.use('/api/supplier-products', supplierProductsRoutes);
@@ -140,18 +177,20 @@ app.use('/api/supplier/orders', supplierOrdersRoutes);
 app.use('/api/supplier-sales', supplierSalesRoutes);
 app.use('/api/supplier-receipts', supplierReceiptRoutes);
 app.use('/api/certified-products', certifiedProductsRoutes);
-
-
 app.use('/api/system-stocks', systemStockRoutes);
 app.use('/api/retailer-stocks', retailerStockRoutes);
 
-// Enhanced health check endpoint
+// Enhanced health check endpoint with detailed diagnostics
 app.get('/api/health', async (req, res) => {
   try {
+    const startTime = Date.now();
+    
     let databaseInfo = {
       status: 'disconnected',
       name: 'unknown',
-      collections: []
+      collections: [],
+      connectionState: mongoose.connection.readyState,
+      readyStateDescription: getMongooseReadyState(mongoose.connection.readyState)
     };
     
     let cloudinaryStatus = process.env.CLOUDINARY_URL ? 'configured' : 'not configured';
@@ -165,16 +204,35 @@ app.get('/api/health', async (req, res) => {
         databaseInfo = {
           status: 'connected',
           name: mongoose.connection.name,
-          collections: collectionNames
+          collections: collectionNames,
+          connectionState: mongoose.connection.readyState,
+          readyStateDescription: 'Connected',
+          host: mongoose.connection.host,
+          port: mongoose.connection.port
         };
       } catch (dbError) {
         databaseInfo = {
           status: 'connected but error accessing collections',
           name: mongoose.connection.name,
-          error: dbError.message
+          error: dbError.message,
+          connectionState: mongoose.connection.readyState,
+          readyStateDescription: 'Connected with errors'
         };
       }
     }
+    
+    // Test basic database operation
+    let dbTest = { success: false, message: 'Not connected' };
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const usersCount = await require('./models/User').countDocuments();
+        dbTest = { success: true, message: 'Operational', usersCount };
+      } catch (dbOpError) {
+        dbTest = { success: false, message: dbOpError.message };
+      }
+    }
+    
+    const responseTime = Date.now() - startTime;
     
     res.json({
       success: true,
@@ -182,8 +240,19 @@ app.get('/api/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'development',
       version: '1.0.0',
+      responseTime: `${responseTime}ms`,
+      server: {
+        port: PORT,
+        platform: process.platform,
+        nodeVersion: process.version
+      },
       database: databaseInfo,
+      databaseTest: dbTest,
       cloudinary: cloudinaryStatus,
+      memory: {
+        used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
+        total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
+      },
       routes: [
         '/api/auth',
         '/api/conversations',
@@ -193,43 +262,81 @@ app.get('/api/health', async (req, res) => {
         '/api/retailers',
         '/api/products',
         '/api/retailer-orders',
-        '/api/transporters' // ADDED
+        '/api/transporters',
+        '/api/health',
+        '/api/test-db',
+        '/api/test-mongodb'
       ]
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Health check failed',
-      error: error.message
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Test MongoDB connection endpoint
+// Helper function for mongoose ready state
+function getMongooseReadyState(state) {
+  const states = {
+    0: 'disconnected',
+    1: 'connected', 
+    2: 'connecting',
+    3: 'disconnecting',
+    99: 'uninitialized'
+  };
+  return states[state] || 'unknown';
+}
+
+// Enhanced MongoDB connection test endpoint
 app.get('/api/test-mongodb', async (req, res) => {
   try {
-    if (mongoose.connection.readyState === 1) {
+    const connectionState = mongoose.connection.readyState;
+    const stateDescription = getMongooseReadyState(connectionState);
+    
+    if (connectionState === 1) {
       const usersCount = await User.countDocuments();
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      const collectionNames = collections.map(c => c.name);
       
       res.json({
         success: true,
-        message: 'MongoDB is connected',
-        connectionState: mongoose.connection.readyState,
-        usersCount: usersCount
+        message: 'MongoDB is connected and operational',
+        connectionState: connectionState,
+        stateDescription: stateDescription,
+        database: mongoose.connection.name,
+        host: mongoose.connection.host,
+        collections: collectionNames,
+        usersCount: usersCount,
+        performance: {
+          collectionCount: collections.length,
+          userCount: usersCount
+        }
       });
     } else {
       res.json({
         success: false,
         message: 'MongoDB is not connected',
-        connectionState: mongoose.connection.readyState,
-        error: 'Database connection not established'
+        connectionState: connectionState,
+        stateDescription: stateDescription,
+        error: 'Database connection not established',
+        troubleshooting: [
+          'Check MONGODB_URI environment variable',
+          'Verify MongoDB Atlas cluster is running',
+          'Check network connectivity',
+          'Verify IP whitelist in MongoDB Atlas'
+        ]
       });
     }
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'MongoDB test failed',
-      error: error.message
+      error: error.message,
+      connectionState: mongoose.connection.readyState,
+      stateDescription: getMongooseReadyState(mongoose.connection.readyState)
     });
   }
 });
@@ -241,7 +348,9 @@ app.get('/api/test-db', async (req, res) => {
       return res.status(503).json({
         success: false,
         message: 'Database not connected',
-        error: 'Cannot perform database operations without connection'
+        error: 'Cannot perform database operations without connection',
+        connectionState: mongoose.connection.readyState,
+        stateDescription: getMongooseReadyState(mongoose.connection.readyState)
       });
     }
 
@@ -259,18 +368,25 @@ app.get('/api/test-db', async (req, res) => {
     res.json({
       success: true,
       message: 'Database test successful',
+      connectionState: mongoose.connection.readyState,
+      stateDescription: 'Connected',
       counts: {
         users: usersCount,
         conversations: conversationsCount,
         messages: messagesCount,
         orders: ordersCount
+      },
+      performance: {
+        totalRecords: usersCount + conversationsCount + messagesCount + ordersCount
       }
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Database test failed',
-      error: error.message
+      error: error.message,
+      connectionState: mongoose.connection.readyState,
+      stateDescription: getMongooseReadyState(mongoose.connection.readyState)
     });
   }
 });
@@ -486,7 +602,7 @@ app.get('/api/test-retailers', async (req, res) => {
   }
 });
 
-// Test transporter status endpoint - ADDED
+// Test transporter status endpoint
 app.get('/api/test-transporter-status', async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
@@ -606,7 +722,7 @@ app.use('*', (req, res) => {
       '/api/retailers/*',
       '/api/products/*',
       '/api/retailer-orders/*',
-      '/api/transporters/*', // ADDED
+      '/api/transporters/*',
       '/api/health',
       '/api/test-db',
       '/api/test-message',
@@ -614,7 +730,7 @@ app.use('*', (req, res) => {
       '/api/test-products',
       '/api/test-wholesalers',
       '/api/test-retailers',
-      '/api/test-transporter-status', // ADDED
+      '/api/test-transporter-status',
       '/api/test-orders',
       '/api/test-password-reset'
     ]
@@ -662,10 +778,19 @@ app.use((error, req, res, next) => {
     });
   }
   
+  if (error.name === 'MongoNetworkError') {
+    return res.status(503).json({
+      success: false,
+      message: 'Database connection lost',
+      error: 'Please try again later'
+    });
+  }
+  
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -687,29 +812,37 @@ process.on('SIGINT', () => {
   });
 });
 
-// Start the server with database connection
+// Start the server with enhanced database connection
 const startServer = async () => {
+  console.log('🚀 Starting TradeHub Server...');
+  console.log('📁 Environment:', process.env.NODE_ENV || 'development');
+  console.log('🔧 Port:', PORT);
+  
   const isConnected = await connectDB();
   
   server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Health check available at: http://localhost:${PORT}/api/health`);
-    console.log(`API base URL: http://localhost:${PORT}/api`);
-    console.log(`Socket.IO server running`);
-    console.log(`Cloudinary configured for file uploads`);
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`🏥 Health check available at: http://localhost:${PORT}/api/health`);
+    console.log(`🌐 API base URL: http://localhost:${PORT}/api`);
+    console.log(`🔌 Socket.IO server running`);
+    console.log(`☁️  Cloudinary configured for file uploads`);
     
     if (isConnected) {
-      console.log(`MongoDB connected: ${mongoose.connection.name}`);
+      console.log(`🗄️  MongoDB connected: ${mongoose.connection.name}`);
+      console.log(`🔗 Connection State: ${getMongooseReadyState(mongoose.connection.readyState)}`);
     } else {
-      console.log(`MongoDB: NOT CONNECTED (running in limited mode)`);
+      console.log(`⚠️  MongoDB: NOT CONNECTED (running in limited mode)`);
+      console.log(`💡 Some features requiring database access will not work`);
     }
     
-    console.log(`Wholesalers API available at: http://localhost:${PORT}/api/wholesalers`);
-    console.log(`Retailers API available at: http://localhost:${PORT}/api/retailers`);
-    console.log(`Products API available at: http://localhost:${PORT}/api/products`);
-    console.log(`Retailer Orders API available at: http://localhost:${PORT}/api/retailer-orders`);
-    console.log(`Transporter API available at: http://localhost:${PORT}/api/transporters`); // ADDED
-    console.log(`Password Reset API available at: http://localhost:${PORT}/api/auth/forgot-password`);
+    console.log(`📊 Available APIs:`);
+    console.log(`   - Wholesalers: http://localhost:${PORT}/api/wholesalers`);
+    console.log(`   - Retailers: http://localhost:${PORT}/api/retailers`);
+    console.log(`   - Products: http://localhost:${PORT}/api/products`);
+    console.log(`   - Retailer Orders: http://localhost:${PORT}/api/retailer-orders`);
+    console.log(`   - Transporters: http://localhost:${PORT}/api/transporters`);
+    console.log(`   - Password Reset: http://localhost:${PORT}/api/auth/forgot-password`);
+    console.log(`   - System Health: http://localhost:${PORT}/api/health`);
   });
 };
 

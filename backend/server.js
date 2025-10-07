@@ -112,14 +112,15 @@ const connectDB = async () => {
 const app = express();
 const server = http.createServer(app);
 
-// Enhanced CORS configuration for production
+// Enhanced CORS configuration for production - ADDED NETLIFY DOMAIN
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173', 
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5173',
   'https://my-trade.vercel.app', // Your Vercel frontend
-  'https://mytrade-cx5z.onrender.com' // Your Render backend (for API calls between services)
+  'https://mytrade-cx5z.onrender.com', // Your Render backend (for API calls between services)
+  'https://mytradeuganda.netlify.app' // ADDED: Your Netlify frontend domain
 ];
 
 const io = socketIo(server, {
@@ -133,16 +134,18 @@ const io = socketIo(server, {
 
 const PORT = process.env.PORT || 5000;
 
-// Enhanced CORS configuration with production support
+// Enhanced CORS configuration with production support - EXPANDED FOR NETLIFY
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, postman, etc.)
     if (!origin) return callback(null, true);
     
+    // Check if origin is in allowed list
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
       console.log('CORS blocked for origin:', origin);
+      console.log('Allowed origins:', allowedOrigins);
       return callback(new Error('Not allowed by CORS'));
     }
   },
@@ -256,6 +259,11 @@ app.get('/api/health', async (req, res) => {
       memory: {
         used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
         total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
+      },
+      cors: {
+        enabled: true,
+        allowedOrigins: allowedOrigins,
+        netlifyFrontend: 'https://mytradeuganda.netlify.app'
       },
       routes: [
         '/api/auth',
@@ -748,7 +756,9 @@ app.use((error, req, res, next) => {
   if (error.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
-      message: 'CORS policy: Request not allowed'
+      message: 'CORS policy: Request not allowed',
+      allowedOrigins: allowedOrigins,
+      yourOrigin: req.headers.origin
     });
   }
   
@@ -830,6 +840,7 @@ const startServer = async () => {
     console.log(`🌐 API base URL: http://localhost:${PORT}/api`);
     console.log(`🔌 Socket.IO server running`);
     console.log(`☁️  Cloudinary configured for file uploads`);
+    console.log(`🌍 CORS enabled for origins:`, allowedOrigins);
     
     if (isConnected) {
       console.log(`🗄️  MongoDB connected: ${mongoose.connection.name}`);

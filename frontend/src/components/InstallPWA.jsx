@@ -5,17 +5,35 @@ const InstallPWA = () => {
   const [promptInstall, setPromptInstall] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [showManualInstructions, setShowManualInstructions] = useState(false);
+  const [pwaStatus, setPwaStatus] = useState('checking');
 
   useEffect(() => {
-    const handler = (e) => {
-      e.preventDefault();
-      console.log('🚀 PWA install prompt available');
-      setSupportsPWA(true);
-      setPromptInstall(e);
+    const checkPWARequirements = () => {
+      const status = {
+        isHTTPS: window.location.protocol === 'https:',
+        hasServiceWorker: 'serviceWorker' in navigator,
+        hasManifest: !!document.querySelector('link[rel="manifest"]'),
+        isStandalone: window.matchMedia('(display-mode: standalone)').matches,
+        isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent),
+        userAgent: navigator.userAgent,
+      };
+
+      console.log('🔍 PWA Status Check:', status);
+      return status;
     };
 
-    // Check if app is already installed
+    const handler = (e) => {
+      e.preventDefault();
+      console.log('🚀 beforeinstallprompt event fired');
+      setSupportsPWA(true);
+      setPromptInstall(e);
+      setPwaStatus('ready');
+    };
+
     const checkInstalled = () => {
+      const status = checkPWARequirements();
+      
+      // Multiple methods to check if app is installed
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
       const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
       const isMinimalUI = window.matchMedia('(display-mode: minimal-ui)').matches;
@@ -24,7 +42,19 @@ const InstallPWA = () => {
       if (isStandalone || isFullscreen || isMinimalUI || isIOSStandalone) {
         console.log('📱 App is already installed');
         setIsInstalled(true);
+        setPwaStatus('installed');
         return true;
+      }
+
+      // For production, also show button if basic PWA requirements are met
+      // even if beforeinstallprompt hasn't fired yet
+      if (process.env.NODE_ENV === 'production') {
+        const meetsBasicRequirements = status.isHTTPS && status.hasManifest && status.hasServiceWorker;
+        if (meetsBasicRequirements && !isInstalled) {
+          console.log('🏗️ Basic PWA requirements met, showing install option');
+          setPwaStatus('available');
+          setSupportsPWA(true);
+        }
       }
       
       return false;
@@ -32,17 +62,27 @@ const InstallPWA = () => {
 
     checkInstalled();
 
+    // Listen for beforeinstallprompt event
     window.addEventListener('beforeinstallprompt', handler);
+
+    // Listen for app installed event
     window.addEventListener('appinstalled', (evt) => {
       console.log('🎉 App was successfully installed');
       setIsInstalled(true);
       setPromptInstall(null);
+      setPwaStatus('installed');
     });
+
+    // Check again after a delay to catch any late-loading service workers
+    const timeoutId = setTimeout(() => {
+      checkInstalled();
+    }, 3000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handler);
+      clearTimeout(timeoutId);
     };
-  }, []);
+  }, [isInstalled]);
 
   const onClick = async (evt) => {
     evt.preventDefault();
@@ -60,6 +100,7 @@ const InstallPWA = () => {
       if (result.outcome === 'accepted') {
         console.log('✅ User accepted the install');
         setPromptInstall(null);
+        setPwaStatus('installed');
       } else {
         console.log('❌ User dismissed the install');
       }
@@ -72,7 +113,22 @@ const InstallPWA = () => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
-  const shouldShowButton = !isInstalled && (supportsPWA || process.env.NODE_ENV === 'development');
+  // Show button if:
+  // 1. Not installed AND
+  // 2. (Supports PWA OR we're in development OR basic PWA requirements are met in production)
+  const shouldShowButton = !isInstalled && (
+    supportsPWA || 
+    process.env.NODE_ENV === 'development' || 
+    pwaStatus === 'available'
+  );
+
+  console.log('🎯 Install Button Conditions:', {
+    shouldShowButton,
+    isInstalled,
+    supportsPWA,
+    pwaStatus,
+    isProduction: process.env.NODE_ENV === 'production'
+  });
 
   if (!shouldShowButton) {
     return null;
@@ -80,7 +136,7 @@ const InstallPWA = () => {
 
   return (
     <>
-      {/* Main Install Button - Reduced Size */}
+      {/* Main Install Button */}
       <div className="fixed bottom-4 right-4 z-50 animate-fade-in">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 max-w-xs">
           <div className="flex items-start space-x-2">
@@ -120,7 +176,7 @@ const InstallPWA = () => {
         </div>
       </div>
 
-      {/* Manual Instructions Modal - Reduced Size */}
+      {/* Manual Instructions Modal */}
       {showManualInstructions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-3">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full p-4">
@@ -190,6 +246,16 @@ const InstallPWA = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Debug info - only in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed top-4 left-4 z-50 bg-black bg-opacity-80 text-white p-3 rounded text-xs max-w-xs">
+          <div>PWA Status: {pwaStatus}</div>
+          <div>Supports PWA: {supportsPWA.toString()}</div>
+          <div>Installed: {isInstalled.toString()}</div>
+          <div>Environment: {process.env.NODE_ENV}</div>
         </div>
       )}
     </>

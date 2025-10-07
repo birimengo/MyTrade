@@ -1,18 +1,26 @@
-
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
   ],
-  base: './', // Change this to relative path
   build: {
     outDir: 'dist',
-    emptyOutDir: true,
-    assetsDir: 'assets', // Organize assets in a subdirectory
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['recharts', 'chart.js', 'react-router-dom']
+        }
+      }
+    }
   },
-  publicDir: 'public', // Ensure public directory for static assets
+  server: {
+    port: 3000,
+  }
 })

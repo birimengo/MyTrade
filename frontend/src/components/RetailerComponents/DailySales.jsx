@@ -507,8 +507,12 @@ class DailySales extends Component {
     const gridLayout = isMobile ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3';
     const gridGap = isMobile ? 'gap-2' : 'gap-4';
 
+    // NEW: Responsive height - increased on mobile
+    const containerHeight = isMobile ? 'h-[600px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
+    const panelHeight = isMobile ? 'h-[600px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
+
     return (
-      <div className={`h-[500px] overflow-y-auto bg-gray-50 dark:bg-gray-900 ${containerPadding}`}>
+      <div className={`${containerHeight} overflow-y-auto bg-gray-50 dark:bg-gray-900 ${containerPadding}`}>
         <div className="max-w-7xl mx-auto">
           {/* Header */}
           <div className={`mb-2 flex justify-between items-center ${isMobile ? 'flex-col space-y-2 items-start' : ''}`}>
@@ -655,7 +659,7 @@ class DailySales extends Component {
           
           <div className={`grid ${gridLayout} ${gridGap}`}>
             {/* Product Selection Panel */}
-            <div className={`flex flex-col h-[500px] bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
+            <div className={`flex flex-col ${panelHeight} bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold text-gray-900 dark:text-white`}>Select Product</h2>
                 <button 
@@ -748,7 +752,7 @@ class DailySales extends Component {
             </div>
             
             {/* Sales Form */}
-            <div className={`flex flex-col h-[500px] bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
+            <div className={`flex flex-col ${panelHeight} bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
               <h2 className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold text-gray-900 dark:text-white mb-3`}>Record Sale</h2>
               
               {selectedProduct ? (
@@ -878,7 +882,7 @@ class DailySales extends Component {
             </div>
             
             {/* Recent Sales */}
-            <div className={`flex flex-col h-[500px] bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
+            <div className={`flex flex-col ${panelHeight} bg-white dark:bg-gray-800 ${panelPadding} rounded-lg shadow-md`}>
               <div className="flex justify-between items-center mb-3">
                 <h2 className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold text-gray-900 dark:text-white`}>Recent Sales</h2>
                 <div className="flex space-x-1">

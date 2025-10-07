@@ -278,31 +278,6 @@ const InstallPWA = () => {
           </div>
         </div>
       )}
-
-      {/* Debug Panel */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="fixed top-4 left-4 z-50 bg-black text-white p-3 rounded text-xs max-w-xs space-y-1">
-          <div><strong>PWA Debug:</strong></div>
-          <div>Status: {pwaStatus}</div>
-          <div>Prompt: {promptInstall ? 'YES' : 'NO'}</div>
-          <div>Installed: {isInstalled ? 'YES' : 'NO'}</div>
-          <div>HTTPS: {debugInfo.isHTTPS ? 'YES' : 'NO'}</div>
-          <div>Manifest: {debugInfo.hasManifest ? 'YES' : 'NO'}</div>
-          <div>ServiceWorker: {debugInfo.hasServiceWorker ? 'YES' : 'NO'}</div>
-          <button 
-            onClick={() => {
-              // Force trigger for testing
-              const event = new Event('beforeinstallprompt');
-              event.prompt = () => Promise.resolve({ outcome: 'accepted' });
-              event.userChoice = Promise.resolve({ outcome: 'accepted' });
-              window.dispatchEvent(event);
-            }}
-            className="mt-1 bg-blue-500 px-2 py-1 rounded text-xs"
-          >
-            Simulate Prompt
-          </button>
-        </div>
-      )}
     </>
   );
 };

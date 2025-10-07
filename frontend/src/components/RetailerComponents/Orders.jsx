@@ -13,6 +13,7 @@ const Orders = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   const limit = 10;
 
@@ -20,6 +21,13 @@ const Orders = () => {
   const placeholderImage = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0yMCAxM00yMCAyN00xMyAyMEgyNyIgc3Ryb2tlPSIjOUE5QTlBIiBzdHJva2Utd2lkdGhuYW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K';
 
   useEffect(() => {
+    // Handle window resize for responsive behavior
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    
     // Get user info from localStorage
     const userData = JSON.parse(localStorage.getItem('user'));
     setUser(userData);
@@ -27,6 +35,10 @@ const Orders = () => {
     if (userData) {
       fetchOrders(userData);
     }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
   }, [statusFilter, currentPage]);
 
   const fetchOrders = async (userData) => {
@@ -747,8 +759,12 @@ const Orders = () => {
     );
   });
 
+  // Responsive height calculations
+  const containerHeight = isMobile ? 'h-[500px]' : 'h-[450px]';
+  const ordersContainerHeight = isMobile ? 'h-[380px]' : 'h-[320px]';
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 mt-2">
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow p-3 mt-2 ${containerHeight}`}>
       <h2 className="text-base font-semibold dark:text-white mb-3">My Orders</h2>
       
       {/* Search and Filter */}
@@ -822,8 +838,8 @@ const Orders = () => {
         </div>
       )}
 
-      {/* Orders Container with Fixed Height and Scroll */}
-      <div className="h-[320px] overflow-y-auto">
+      {/* Orders Container with Responsive Height and Scroll */}
+      <div className={`overflow-y-auto ${ordersContainerHeight}`}>
         {filteredOrders.length === 0 ? (
           <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs">
             No orders found matching your criteria.

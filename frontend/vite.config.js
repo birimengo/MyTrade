@@ -7,15 +7,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  base: '/', // CHANGE THIS LINE - remove process.env.VITE_BASE_PATH
   build: {
     outDir: 'dist',
-    sourcemap: false,
-    chunkSizeWarningLimit: 1600,
-  },
-  server: {
-    port: 5173,
-    host: true
-  },
-  // Remove base: './' or set it to empty for absolute paths
-  base: ''
+    emptyOutDir: true
+  }
 })

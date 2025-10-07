@@ -508,8 +508,8 @@ class DailySales extends Component {
     const gridGap = isMobile ? 'gap-2' : 'gap-4';
 
     // NEW: Responsive height - increased on mobile
-    const containerHeight = isMobile ? 'h-[600px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
-    const panelHeight = isMobile ? 'h-[600px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
+    const containerHeight = isMobile ? 'h-[680px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
+    const panelHeight = isMobile ? 'h-[680px]' : 'h-[500px]'; // Increased from 500px to 600px on mobile
 
     return (
       <div className={`${containerHeight} overflow-y-auto bg-gray-50 dark:bg-gray-900 ${containerPadding}`}>

@@ -11,16 +11,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          ui: ['recharts', 'chart.js', 'react-router-dom']
-        }
-      }
-    }
+    // Remove the rollupOptions for now to fix the build
   },
   server: {
-    port: 3000,
+    port: 5173,
   }
 })

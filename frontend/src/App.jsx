@@ -15,6 +15,7 @@ import DashboardRedirect from './components/DashboardRedirect';
 import ProtectedRoute from './components/ProtectedRoute';
 import WholesalerProducts from './components/RetailerComponents/WholesalerProducts';
 import SupplierWholesalersProducts from './components/WholesalerComponents/SupplierWholesalersProducts';
+import InstallPWA from './components/InstallPWA'; // Add this import
 
 // Import your API config
 import { API_BASE_URL, SOCKET_SERVER } from './config/api';
@@ -72,6 +73,9 @@ function App() {
       <AuthProvider>
         <Router>
           <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white">
+            {/* Install PWA Button - Will only show when conditions are met */}
+            <InstallPWA />
+            
             <Routes>
               <Route path="/" element={<RoleSelection />} />
               <Route path="/signup" element={<Signup />} />

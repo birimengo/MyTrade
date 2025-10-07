@@ -114,10 +114,10 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 m-4 max-w-lg w-full">
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-start sm:items-center z-50 p-3">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 max-w-md w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center pb-3 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
             Order {product.name}
           </h3>
           <button
@@ -125,7 +125,7 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
           >
             <svg
-              className="w-6 h-6"
+              className="w-5 h-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -140,10 +140,10 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-3 space-y-3">
           {error && (
             <div
-              className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative dark:bg-red-900/20 dark:border-red-800 dark:text-red-300"
+              className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded text-xs dark:bg-red-900/20 dark:border-red-800 dark:text-red-300"
               role="alert"
             >
               <span className="block sm:inline">{error}</span>
@@ -152,13 +152,13 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
 
           {/* Product details */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
               Product
             </label>
-            <p className="mt-1 text-base text-gray-900 dark:text-white">
+            <p className="mt-1 text-sm text-gray-900 dark:text-white">
               {product.name}
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               Price: UGX {product.price.toLocaleString()} per{' '}
               {product.measurementUnit}
             </p>
@@ -168,7 +168,7 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
           <div>
             <label
               htmlFor="quantity"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              className="block text-xs font-medium text-gray-700 dark:text-gray-300"
             >
               Quantity ({product.measurementUnit})
             </label>
@@ -179,20 +179,19 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               min={product.minOrderQuantity || 1}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              className="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"
               required
             />
             {product.minOrderQuantity && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Minimum order quantity: {product.minOrderQuantity}{' '}
+                Minimum order: {product.minOrderQuantity}{' '}
                 {product.measurementUnit}
               </p>
             )}
             {product.bulkDiscount &&
               quantity >= product.bulkDiscount.minQuantity && (
                 <p className="mt-1 text-xs text-green-600 dark:text-green-400">
-                  Bulk discount applied:{' '}
-                  {product.bulkDiscount.discountPercentage}% off!
+                  Bulk discount: {product.bulkDiscount.discountPercentage}% off!
                 </p>
               )}
           </div>
@@ -201,9 +200,9 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
           <div className="relative">
             <label
               htmlFor="deliveryPlace"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              className="block text-xs font-medium text-gray-700 dark:text-gray-300"
             >
-              Delivery Place
+              Delivery Place *
             </label>
             <input
               type="text"
@@ -211,7 +210,7 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
               name="deliveryPlace"
               value={deliveryPlace}
               onChange={(e) => setDeliveryPlace(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              className="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"
               placeholder="Enter your delivery address..."
               required
             />
@@ -221,7 +220,7 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
           <div>
             <label
               htmlFor="orderNotes"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              className="block text-xs font-medium text-gray-700 dark:text-gray-300"
             >
               Order Notes (Optional)
             </label>
@@ -230,38 +229,38 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
               name="orderNotes"
               value={orderNotes}
               onChange={(e) => setOrderNotes(e.target.value)}
-              rows={3}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              rows={2}
+              className="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"
               placeholder="Any special instructions for delivery..."
             />
           </div>
 
           {/* Coordinates */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
               Detected Coordinates
             </label>
             {locationStatus === 'pending' && (
-              <p className="text-sm text-blue-500">Detecting your location...</p>
+              <p className="text-xs text-blue-500">Detecting your location...</p>
             )}
             {locationStatus === 'success' && (
-              <p className="text-sm text-green-500">
+              <p className="text-xs text-green-500">
                 Location detected automatically.
               </p>
             )}
             {locationStatus === 'error' && (
-              <p className="text-sm text-yellow-500">
-                Location detection failed. Please enter your address manually.
+              <p className="text-xs text-yellow-500">
+                Location detection failed. Please enter address manually.
               </p>
             )}
 
-            <div className="grid grid-cols-2 gap-4 mt-1">
+            <div className="grid grid-cols-2 gap-2 mt-1">
               <input
                 type="text"
                 name="latitude"
                 value={coordinates.lat || ''}
                 readOnly
-                className="block w-full rounded-md border-gray-300 shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white text-xs text-gray-500 bg-gray-100 cursor-not-allowed"
+                className="block w-full rounded border-gray-300 shadow-sm text-xs text-gray-500 bg-gray-100 cursor-not-allowed p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400"
                 placeholder="Latitude"
               />
               <input
@@ -269,41 +268,40 @@ const OrderForm = ({ product, onClose, onSubmit }) => {
                 name="longitude"
                 value={coordinates.lng || ''}
                 readOnly
-                className="block w-full rounded-md border-gray-300 shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white text-xs text-gray-500 bg-gray-100 cursor-not-allowed"
+                className="block w-full rounded border-gray-300 shadow-sm text-xs text-gray-500 bg-gray-100 cursor-not-allowed p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400"
                 placeholder="Longitude"
               />
             </div>
             {(coordinates.lat || coordinates.lng) && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                These coordinates were automatically detected for delivery
-                tracking.
+                Coordinates detected for delivery tracking.
               </p>
             )}
           </div>
 
           {/* Total Price */}
           <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-700">
-            <span className="text-lg font-bold text-gray-800 dark:text-gray-200">
+            <span className="text-base font-bold text-gray-800 dark:text-gray-200">
               Total Price:
             </span>
-            <span className="text-xl font-bold text-green-600 dark:text-green-400">
+            <span className="text-lg font-bold text-green-600 dark:text-green-400">
               UGX {totalPrice.toLocaleString()}
             </span>
           </div>
 
           {/* Buttons */}
-          <div className="flex justify-end space-x-3 mt-6">
+          <div className="flex justify-end space-x-2 mt-4">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200"
+              className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+              className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
             >
               {loading ? 'Placing Order...' : 'Place Order'}
             </button>

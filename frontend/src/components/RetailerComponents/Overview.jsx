@@ -31,9 +31,18 @@ const Overview = () => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
     fetchMetrics();
+    
+    // Add resize listener for responsive behavior
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const fetchMetrics = async () => {
@@ -230,94 +239,143 @@ const Overview = () => {
     }
   };
 
-  const MetricCard = ({ title, value, icon, color, subtitle, trend, loading, isPercentage = false }) => (
-    <div className={`
-      bg-white dark:bg-gray-800 rounded-lg shadow-sm p-3 border-l-3 transition-all duration-200 hover:shadow-md
-      ${loading ? 'animate-pulse' : ''}
-      min-h-[80px] flex flex-col justify-center
-    `} style={{ borderLeftColor: color }}>
-      <div className="flex items-center justify-between">
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide truncate">
-            {title}
-          </p>
-          {loading ? (
-            <div className="space-y-1">
-              <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-              <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-            </div>
-          ) : (
-            <>
-              <p className={`
-                font-bold text-gray-900 dark:text-white mb-0.5 truncate
-                text-sm lg:text-base
-              `}>
-                {isPercentage ? `${value}%` : 
-                 typeof value === 'number' && (title.includes('Sales') || title.includes('Profit') || title.includes('Value') || title.includes('Receipts Value')) 
-                  ? `UGX ${value.toLocaleString()}`
-                  : value.toLocaleString()
-                }
-              </p>
-              {subtitle && (
-                <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5 truncate">
-                  {subtitle}
+  const MetricCard = ({ title, value, icon, color, subtitle, trend, loading, isPercentage = false }) => {
+    // NEW: Responsive text sizes and spacing
+    const titleSize = isMobile ? 'text-[9px]' : 'text-[10px]';
+    const valueSize = isMobile ? 'text-xs' : 'text-sm lg:text-base';
+    const subtitleSize = isMobile ? 'text-[8px]' : 'text-[10px]';
+    const trendSize = isMobile ? 'text-[8px]' : 'text-[10px]';
+    const iconSize = isMobile ? 'text-xs' : 'text-sm';
+    const cardPadding = isMobile ? 'p-2' : 'p-3';
+    const cardHeight = isMobile ? 'min-h-[70px]' : 'min-h-[80px]';
+
+    return (
+      <div className={`
+        bg-white dark:bg-gray-800 rounded-lg shadow-sm ${cardPadding} border-l-3 transition-all duration-200 hover:shadow-md
+        ${loading ? 'animate-pulse' : ''}
+        ${cardHeight} flex flex-col justify-center
+      `} style={{ borderLeftColor: color }}>
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0">
+            <p className={`${titleSize} font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide truncate`}>
+              {title}
+            </p>
+            {loading ? (
+              <div className="space-y-1">
+                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+                <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+              </div>
+            ) : (
+              <>
+                <p className={`
+                  font-bold text-gray-900 dark:text-white mb-0.5 truncate
+                  ${valueSize}
+                `}>
+                  {isPercentage ? `${value}%` : 
+                   typeof value === 'number' && (title.includes('Sales') || title.includes('Profit') || title.includes('Value') || title.includes('Receipts Value')) 
+                    ? `UGX ${value.toLocaleString()}`
+                    : value.toLocaleString()
+                  }
                 </p>
-              )}
-              {trend && (
-                <p className={`text-[10px] font-medium ${
-                  trend.includes('+') ? 'text-green-600' : 
-                  trend.includes('Attention') ? 'text-red-600' : 
-                  trend.includes('Low') ? 'text-red-600' : 'text-gray-500'
-                }`}>
-                  {trend}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-        <div className={`
-          flex-shrink-0 ml-2 p-1.5 rounded-lg
-          ${loading ? 'bg-gray-200 dark:bg-gray-700' : ''}
-        `} 
-          style={!loading ? { 
-            backgroundColor: `${color}15`,
-            color: color
-          } : {}}>
+                {subtitle && (
+                  <p className={`${subtitleSize} text-gray-500 dark:text-gray-400 mb-0.5 truncate`}>
+                    {subtitle}
+                  </p>
+                )}
+                {trend && (
+                  <p className={`${trendSize} font-medium ${
+                    trend.includes('+') ? 'text-green-600' : 
+                    trend.includes('Attention') ? 'text-red-600' : 
+                    trend.includes('Low') ? 'text-red-600' : 'text-gray-500'
+                  }`}>
+                    {trend}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
           <div className={`
-            ${loading ? 'w-4 h-4 bg-gray-300 dark:bg-gray-600 rounded' : 'text-sm'}
-          `}>
-            {!loading && icon}
+            flex-shrink-0 ml-2 p-1.5 rounded-lg
+            ${loading ? 'bg-gray-200 dark:bg-gray-700' : ''}
+          `} 
+            style={!loading ? { 
+              backgroundColor: `${color}15`,
+              color: color
+            } : {}}>
+            <div className={`
+              ${loading ? 'w-4 h-4 bg-gray-300 dark:bg-gray-600 rounded' : iconSize}
+            `}>
+              {!loading && icon}
+            </div>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  // NEW: Mobile-optimized grid layouts
+  const getGridLayout = (section) => {
+    if (isMobile) {
+      switch(section) {
+        case 'profit':
+          return 'grid-cols-2 gap-1.5';
+        case 'sales':
+          return 'grid-cols-2 gap-1.5';
+        case 'stock':
+          return 'grid-cols-2 gap-1.5';
+        case 'additional':
+          return 'grid-cols-2 gap-1.5';
+        default:
+          return 'grid-cols-2 gap-1.5';
+      }
+    } else {
+      switch(section) {
+        case 'profit':
+          return 'grid-cols-2 md:grid-cols-4 gap-2';
+        case 'sales':
+          return 'grid-cols-2 md:grid-cols-4 gap-2';
+        case 'stock':
+          return 'grid-cols-2 md:grid-cols-4 gap-2';
+        case 'additional':
+          return 'grid-cols-2 gap-2';
+        default:
+          return 'grid-cols-2 md:grid-cols-4 gap-2';
+      }
+    }
+  };
+
+  // NEW: Mobile-optimized error banner
+  const ErrorBanner = () => (
+    <div className={`bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg ${isMobile ? 'p-2' : 'p-4'} mb-3`}>
+      <div className={`flex ${isMobile ? 'flex-col space-y-2' : 'items-center justify-between'}`}>
+        <div className="flex-1">
+          <h3 className={`font-semibold text-yellow-800 dark:text-yellow-200 mb-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+            Demo Mode
+          </h3>
+          <p className={`text-yellow-700 dark:text-yellow-300 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
+            {error} Showing demo data for development.
+          </p>
+        </div>
+        <button 
+          onClick={fetchMetrics}
+          className={`flex items-center bg-yellow-600 text-white rounded font-medium hover:bg-yellow-700 transition-colors ${
+            isMobile ? 'px-2 py-1 text-[10px] self-start' : 'px-3 py-1.5 text-xs'
+          }`}
+        >
+          <FaChartLine className={isMobile ? "mr-1 text-[8px]" : "mr-1"} />
+          Retry
+        </button>
       </div>
     </div>
   );
 
   if (error && !loading) {
     return (
-      <div className="space-y-4 p-3">
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-1">
-                Demo Mode
-              </h3>
-              <p className="text-yellow-700 dark:text-yellow-300 text-xs">
-                {error} Showing demo data for development.
-              </p>
-            </div>
-            <button 
-              onClick={fetchMetrics}
-              className="flex items-center px-3 py-1.5 bg-yellow-600 text-white rounded text-xs font-medium hover:bg-yellow-700 transition-colors"
-            >
-              <FaChartLine className="mr-1" />
-              Retry
-            </button>
-          </div>
-        </div>
+      <div className={`space-y-3 ${isMobile ? 'p-2' : 'p-3'}`}>
+        <ErrorBanner />
 
-        {/* Profit Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {/* Profit Overview - Mobile optimized */}
+        <div className={`grid ${getGridLayout('profit')}`}>
           <MetricCard
             title="Today's Profit"
             value={metrics.todayProfit}
@@ -337,134 +395,213 @@ const Overview = () => {
             loading={false}
           />
           
-          <MetricCard
-            title="Today's Sales"
-            value={metrics.todaySalesValue}
-            icon={<FaDollarSign />}
-            color="#2563eb"
-            subtitle="Revenue today"
-            loading={false}
-          />
-          
-          <MetricCard
-            title="Total Sales"
-            value={metrics.totalSalesValue}
-            icon={<FaChartBar />}
-            color="#4f46e5"
-            subtitle="All time revenue"
-            loading={false}
-          />
+          {!isMobile && (
+            <>
+              <MetricCard
+                title="Today's Sales"
+                value={metrics.todaySalesValue}
+                icon={<FaDollarSign />}
+                color="#2563eb"
+                subtitle="Revenue today"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Total Sales"
+                value={metrics.totalSalesValue}
+                icon={<FaChartBar />}
+                color="#4f46e5"
+                subtitle="All time revenue"
+                loading={false}
+              />
+            </>
+          )}
         </div>
 
-        {/* Sales & Orders */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {/* Sales & Orders - Mobile optimized */}
+        <div className={`grid ${getGridLayout('sales')}`}>
           <MetricCard
-            title="Today's Transactions"
+            title={isMobile ? "Today's Sales" : "Today's Transactions"}
             value={metrics.todaySalesCount}
             icon={<FaCalendarDay />}
             color="#ea580c"
-            subtitle="Sales today"
+            subtitle={isMobile ? "Sales today" : "Sales today"}
             loading={false}
           />
           
           <MetricCard
-            title="Total Transactions"
+            title={isMobile ? "Total Sales" : "Total Transactions"}
             value={metrics.totalSalesCount}
             icon={<FaShoppingCart />}
             color="#0d9488"
-            subtitle="All time sales"
+            subtitle={isMobile ? "All sales" : "All time sales"}
             loading={false}
           />
           
-          <MetricCard
-            title="Total Orders"
-            value={metrics.totalOrders}
-            icon={<FaShoppingCart />}
-            color="#db2777"
-            subtitle="Orders placed"
-            loading={false}
-          />
-          
-          <MetricCard
-            title="Total Receipts"
-            value={metrics.totalReceipts}
-            icon={<FaReceipt />}
-            color="#9333ea"
-            subtitle="Receipts issued"
-            loading={false}
-          />
+          {!isMobile && (
+            <>
+              <MetricCard
+                title="Total Orders"
+                value={metrics.totalOrders}
+                icon={<FaShoppingCart />}
+                color="#db2777"
+                subtitle="Orders placed"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Total Receipts"
+                value={metrics.totalReceipts}
+                icon={<FaReceipt />}
+                color="#9333ea"
+                subtitle="Receipts issued"
+                loading={false}
+              />
+            </>
+          )}
         </div>
 
-        {/* Stock Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {/* Stock Metrics - Mobile optimized */}
+        <div className={`grid ${getGridLayout('stock')}`}>
           <MetricCard
-            title="Current Stock"
+            title={isMobile ? "Stock Value" : "Current Stock"}
             value={metrics.stockValue}
             icon={<FaBox />}
             color="#ea580c"
-            subtitle="Inventory value"
+            subtitle={isMobile ? "Inventory" : "Inventory value"}
             loading={false}
           />
           
           <MetricCard
-            title="Original Stock"
-            value={metrics.originalStockValue}
-            icon={<FaBox />}
-            color="#2563eb"
-            subtitle="Initial investment"
-            loading={false}
-          />
-          
-          <MetricCard
-            title="Stock Utilization"
+            title={isMobile ? "Stock Used" : "Stock Utilization"}
             value={metrics.stockUtilization}
             icon={<FaChartLine />}
             color="#0d9488"
-            subtitle="Stock sold %"
+            subtitle={isMobile ? "Sold %" : "Stock sold %"}
             trend={metrics.stockUtilization < 50 ? "Low" : "Good"}
             loading={false}
             isPercentage={true}
           />
           
-          <MetricCard
-            title="Low Stock Alerts"
-            value={metrics.lowStockItems}
-            icon={<FaExclamationTriangle />}
-            color="#dc2626"
-            subtitle="Need restocking"
-            trend={metrics.lowStockItems > 0 ? "Attention" : "Good"}
-            loading={false}
-          />
+          {!isMobile && (
+            <>
+              <MetricCard
+                title="Original Stock"
+                value={metrics.originalStockValue}
+                icon={<FaBox />}
+                color="#2563eb"
+                subtitle="Initial investment"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Low Stock"
+                value={metrics.lowStockItems}
+                icon={<FaExclamationTriangle />}
+                color="#dc2626"
+                subtitle="Need restocking"
+                trend={metrics.lowStockItems > 0 ? "Attention" : "Good"}
+                loading={false}
+              />
+            </>
+          )}
         </div>
 
-        {/* Additional Metrics */}
-        <div className="grid grid-cols-2 gap-2">
-          <MetricCard
-            title="Receipts Value"
-            value={metrics.totalReceiptsValue}
-            icon={<FaFileInvoiceDollar />}
-            color="#16a34a"
-            subtitle="Total receipts"
-            loading={false}
-          />
-          
-          <MetricCard
-            title="Product Types"
-            value={metrics.totalStockItems}
-            icon={<FaBox />}
-            color="#4f46e5"
-            subtitle="Different products"
-            loading={false}
-          />
-        </div>
+        {/* Additional row for mobile to show missing metrics */}
+        {isMobile && (
+          <>
+            <div className={`grid ${getGridLayout('additional')}`}>
+              <MetricCard
+                title="Today's Revenue"
+                value={metrics.todaySalesValue}
+                icon={<FaDollarSign />}
+                color="#2563eb"
+                subtitle="Sales today"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Total Revenue"
+                value={metrics.totalSalesValue}
+                icon={<FaChartBar />}
+                color="#4f46e5"
+                subtitle="All sales"
+                loading={false}
+              />
+            </div>
+            
+            <div className={`grid ${getGridLayout('additional')}`}>
+              <MetricCard
+                title="Total Orders"
+                value={metrics.totalOrders}
+                icon={<FaShoppingCart />}
+                color="#db2777"
+                subtitle="Orders"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Receipts"
+                value={metrics.totalReceipts}
+                icon={<FaReceipt />}
+                color="#9333ea"
+                subtitle="Total"
+                loading={false}
+              />
+            </div>
+            
+            <div className={`grid ${getGridLayout('additional')}`}>
+              <MetricCard
+                title="Initial Stock"
+                value={metrics.originalStockValue}
+                icon={<FaBox />}
+                color="#2563eb"
+                subtitle="Investment"
+                loading={false}
+              />
+              
+              <MetricCard
+                title="Low Stock"
+                value={metrics.lowStockItems}
+                icon={<FaExclamationTriangle />}
+                color="#dc2626"
+                subtitle="Alerts"
+                loading={false}
+              />
+            </div>
+          </>
+        )}
+
+        {/* Additional Metrics - Only show on desktop */}
+        {!isMobile && (
+          <div className={`grid ${getGridLayout('additional')}`}>
+            <MetricCard
+              title="Receipts Value"
+              value={metrics.totalReceiptsValue}
+              icon={<FaFileInvoiceDollar />}
+              color="#16a34a"
+              subtitle="Total receipts"
+              loading={false}
+            />
+            
+            <MetricCard
+              title="Product Types"
+              value={metrics.totalStockItems}
+              icon={<FaBox />}
+              color="#4f46e5"
+              subtitle="Different products"
+              loading={false}
+            />
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-3">
+    <div className={`space-y-3 ${isMobile ? 'p-2' : 'p-3'}`}>
       {/* Profit Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className={`grid ${getGridLayout('profit')}`}>
         <MetricCard
           title="Today's Profit"
           value={metrics.todayProfit}
@@ -484,126 +621,205 @@ const Overview = () => {
           loading={loading}
         />
         
-        <MetricCard
-          title="Today's Sales"
-          value={metrics.todaySalesValue}
-          icon={<FaDollarSign />}
-          color="#2563eb"
-          subtitle="Revenue today"
-          loading={loading}
-        />
-        
-        <MetricCard
-          title="Total Sales"
-          value={metrics.totalSalesValue}
-          icon={<FaChartBar />}
-          color="#4f46e5"
-          subtitle="All time revenue"
-          loading={loading}
-        />
+        {!isMobile && (
+          <>
+            <MetricCard
+              title="Today's Sales"
+              value={metrics.todaySalesValue}
+              icon={<FaDollarSign />}
+              color="#2563eb"
+              subtitle="Revenue today"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Total Sales"
+              value={metrics.totalSalesValue}
+              icon={<FaChartBar />}
+              color="#4f46e5"
+              subtitle="All time revenue"
+              loading={loading}
+            />
+          </>
+        )}
       </div>
 
       {/* Sales & Orders */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className={`grid ${getGridLayout('sales')}`}>
         <MetricCard
-          title="Today's Transactions"
+          title={isMobile ? "Today's Sales" : "Today's Transactions"}
           value={metrics.todaySalesCount}
           icon={<FaCalendarDay />}
           color="#ea580c"
-          subtitle="Sales today"
+          subtitle={isMobile ? "Sales today" : "Sales today"}
           loading={loading}
         />
         
         <MetricCard
-          title="Total Transactions"
+          title={isMobile ? "Total Sales" : "Total Transactions"}
           value={metrics.totalSalesCount}
           icon={<FaShoppingCart />}
           color="#0d9488"
-          subtitle="All time sales"
+          subtitle={isMobile ? "All sales" : "All time sales"}
           loading={loading}
         />
         
-        <MetricCard
-          title="Total Orders"
-          value={metrics.totalOrders}
-          icon={<FaShoppingCart />}
-          color="#db2777"
-          subtitle="Orders placed"
-          loading={loading}
-        />
-        
-        <MetricCard
-          title="Total Receipts"
-          value={metrics.totalReceipts}
-          icon={<FaReceipt />}
-          color="#9333ea"
-          subtitle="Receipts issued"
-          loading={loading}
-        />
+        {!isMobile && (
+          <>
+            <MetricCard
+              title="Total Orders"
+              value={metrics.totalOrders}
+              icon={<FaShoppingCart />}
+              color="#db2777"
+              subtitle="Orders placed"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Total Receipts"
+              value={metrics.totalReceipts}
+              icon={<FaReceipt />}
+              color="#9333ea"
+              subtitle="Receipts issued"
+              loading={loading}
+            />
+          </>
+        )}
       </div>
 
       {/* Stock Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className={`grid ${getGridLayout('stock')}`}>
         <MetricCard
-          title="Current Stock"
+          title={isMobile ? "Stock Value" : "Current Stock"}
           value={metrics.stockValue}
           icon={<FaBox />}
           color="#ea580c"
-          subtitle="Inventory value"
+          subtitle={isMobile ? "Inventory" : "Inventory value"}
           loading={loading}
         />
         
         <MetricCard
-          title="Original Stock"
-          value={metrics.originalStockValue}
-          icon={<FaBox />}
-          color="#2563eb"
-          subtitle="Initial investment"
-          loading={loading}
-        />
-        
-        <MetricCard
-          title="Stock Utilization"
+          title={isMobile ? "Stock Used" : "Stock Utilization"}
           value={metrics.stockUtilization}
           icon={<FaChartLine />}
           color="#0d9488"
-          subtitle="Stock sold %"
+          subtitle={isMobile ? "Sold %" : "Stock sold %"}
           trend={metrics.stockUtilization < 50 ? "Low" : "Good"}
           loading={loading}
           isPercentage={true}
         />
         
-        <MetricCard
-          title="Low Stock Alerts"
-          value={metrics.lowStockItems}
-          icon={<FaExclamationTriangle />}
-          color="#dc2626"
-          subtitle="Need restocking"
-          trend={metrics.lowStockItems > 0 ? "Attention" : "Good"}
-          loading={loading}
-        />
+        {!isMobile && (
+          <>
+            <MetricCard
+              title="Original Stock"
+              value={metrics.originalStockValue}
+              icon={<FaBox />}
+              color="#2563eb"
+              subtitle="Initial investment"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Low Stock"
+              value={metrics.lowStockItems}
+              icon={<FaExclamationTriangle />}
+              color="#dc2626"
+              subtitle="Need restocking"
+              trend={metrics.lowStockItems > 0 ? "Attention" : "Good"}
+              loading={loading}
+            />
+          </>
+        )}
       </div>
 
-      {/* Additional Metrics */}
-      <div className="grid grid-cols-2 gap-2">
-        <MetricCard
-          title="Receipts Value"
-          value={metrics.totalReceiptsValue}
-          icon={<FaFileInvoiceDollar />}
-          color="#16a34a"
-          subtitle="Total receipts"
-          loading={loading}
-        />
-        
-        <MetricCard
-          title="Product Types"
-          value={metrics.totalStockItems}
-          icon={<FaBox />}
-          color="#4f46e5"
-          subtitle="Different products"
-          loading={loading}
-        />
-      </div>
+      {/* Additional row for mobile to show missing metrics */}
+      {isMobile && (
+        <>
+          <div className={`grid ${getGridLayout('additional')}`}>
+            <MetricCard
+              title="Today's Revenue"
+              value={metrics.todaySalesValue}
+              icon={<FaDollarSign />}
+              color="#2563eb"
+              subtitle="Sales today"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Total Revenue"
+              value={metrics.totalSalesValue}
+              icon={<FaChartBar />}
+              color="#4f46e5"
+              subtitle="All sales"
+              loading={loading}
+            />
+          </div>
+          
+          <div className={`grid ${getGridLayout('additional')}`}>
+            <MetricCard
+              title="Total Orders"
+              value={metrics.totalOrders}
+              icon={<FaShoppingCart />}
+              color="#db2777"
+              subtitle="Orders"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Receipts"
+              value={metrics.totalReceipts}
+              icon={<FaReceipt />}
+              color="#9333ea"
+              subtitle="Total"
+              loading={loading}
+            />
+          </div>
+          
+          <div className={`grid ${getGridLayout('additional')}`}>
+            <MetricCard
+              title="Initial Stock"
+              value={metrics.originalStockValue}
+              icon={<FaBox />}
+              color="#2563eb"
+              subtitle="Investment"
+              loading={loading}
+            />
+            
+            <MetricCard
+              title="Low Stock"
+              value={metrics.lowStockItems}
+              icon={<FaExclamationTriangle />}
+              color="#dc2626"
+              subtitle="Alerts"
+              loading={loading}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Additional Metrics - Only show on desktop */}
+      {!isMobile && (
+        <div className={`grid ${getGridLayout('additional')}`}>
+          <MetricCard
+            title="Receipts Value"
+            value={metrics.totalReceiptsValue}
+            icon={<FaFileInvoiceDollar />}
+            color="#16a34a"
+            subtitle="Total receipts"
+            loading={loading}
+          />
+          
+          <MetricCard
+            title="Product Types"
+            value={metrics.totalStockItems}
+            icon={<FaBox />}
+            color="#4f46e5"
+            subtitle="Different products"
+            loading={loading}
+          />
+        </div>
+      )}
     </div>
   );
 };

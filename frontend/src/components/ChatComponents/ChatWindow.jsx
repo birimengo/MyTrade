@@ -6,7 +6,7 @@ import TypingIndicator from './TypingIndicator';
 import OnlineIndicator from './OnlineIndicator';
 import { FaTimes, FaUser, FaArrowLeft, FaSync, FaExclamationTriangle } from 'react-icons/fa';
 
-const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
+const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggleMobile = null }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,7 +14,18 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
   const [typingUsers, setTypingUsers] = useState([]);
   const [recordingUsers, setRecordingUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    // Mobile detection
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if (conversation) {
@@ -220,9 +231,15 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
 
   const participant = getParticipant();
 
+  // NEW: Responsive dimensions
+  const chatHeight = isMobile ? 'h-[calc(100vh-120px)]' : 'h-[600px]';
+  const headerPadding = isMobile ? 'p-2' : 'p-3';
+  const messagePadding = isMobile ? 'p-1' : 'p-2';
+  const textSize = isMobile ? 'text-xs' : 'text-sm';
+
   if (!conversation) {
     return (
-      <div className="flex flex-col h-full bg-white dark:bg-gray-800 items-center justify-center">
+      <div className={`flex flex-col h-full bg-white dark:bg-gray-800 items-center justify-center ${chatHeight}`}>
         <div className="text-center p-6">
           <FaExclamationTriangle className="mx-auto text-2xl text-yellow-500 mb-4" />
           <p className="text-gray-600 dark:text-gray-300">No conversation selected</p>
@@ -232,32 +249,33 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-800 h-[600px]">
+    <div className={`flex flex-col h-full bg-white dark:bg-gray-800 ${chatHeight}`}>
       {/* Header */}
-      <div className="p-2 border-b border-gray-200 dark:border-gray-700 flex items-center">
-        {isEmbedded && (
+      <div className={`${headerPadding} border-b border-gray-200 dark:border-gray-700 flex items-center`}>
+        {(isEmbedded || isMobile) && (
           <button
-            onClick={onClose}
-            className="lg:hidden mr-2 p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            onClick={onToggleMobile || onClose}
+            className="mr-2 p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           >
-            <FaArrowLeft className="text-sm" />
+            <FaArrowLeft className={isMobile ? "text-sm" : "text-sm"} />
           </button>
         )}
         <div className="flex items-center space-x-2 flex-1">
           <div className="relative">
-            <div className="w-8 h-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
-              <FaUser className="text-xs" />
+            <div className={`${isMobile ? 'w-6 h-6' : 'w-8 h-8'} bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center`}>
+              <FaUser className={isMobile ? "text-xs" : "text-xs"} />
             </div>
             <OnlineIndicator 
               isOnline={isParticipantOnline()} 
-              className="-top-0.5 -right-0.5"
+              className={isMobile ? "-top-0.5 -right-0.5" : "-top-0.5 -right-0.5"}
+              size={isMobile ? "xs" : "xs"}
             />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+            <h3 className={`font-medium text-gray-900 dark:text-white truncate ${isMobile ? 'text-sm' : 'text-sm'}`}>
               {participant?.businessName || `${participant?.firstName} ${participant?.lastName}`}
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+            <p className={`text-gray-500 dark:text-gray-400 capitalize ${isMobile ? 'text-xs' : 'text-xs'}`}>
               {participant?.role}
               {isParticipantOnline() && (
                 <span className="text-green-500 ml-1">• Online</span>
@@ -273,10 +291,10 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
           className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-50"
           title="Refresh messages"
         >
-          <FaSync className={`text-sm ${loading ? 'animate-spin' : ''}`} />
+          <FaSync className={`${isMobile ? 'text-xs' : 'text-sm'} ${loading ? 'animate-spin' : ''}`} />
         </button>
         
-        {!isEmbedded && (
+        {!isEmbedded && !isMobile && (
           <button
             onClick={onClose}
             className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
@@ -287,7 +305,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className={`flex-1 overflow-y-auto ${messagePadding}`}>
         {loading ? (
           <div className="flex justify-center items-center h-full">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
@@ -316,12 +334,14 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
               currentUserId={user._id} 
               socket={socket}
               conversationId={conversation._id}
+              isMobile={isMobile}
             />
             <TypingIndicator 
               typingUsers={typingUsers}
               recordingUsers={recordingUsers}
               participants={conversation.participants}
               currentUserId={user._id}
+              isMobile={isMobile}
             />
           </>
         )}
@@ -335,6 +355,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
         onRecording={handleRecording}
         onFileUpload={handleFileUpload}
         onVoiceMessage={handleVoiceMessage}
+        isMobile={isMobile}
       />
     </div>
   );

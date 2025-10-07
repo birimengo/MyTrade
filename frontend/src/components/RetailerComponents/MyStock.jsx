@@ -238,8 +238,67 @@ const MyStock = () => {
     }
   };
 
-  const renderStockTable = (stocks, isSystemStock = false) => (
-    <div className="overflow-x-auto">
+  // Stock Card Component for small screens
+  const StockCard = ({ stock, isSystemStock = false }) => (
+    <div className="bg-white dark:bg-gray-700 rounded-lg shadow-sm border border-gray-200 dark:border-gray-600 p-4">
+      <div className="flex justify-between items-start mb-3">
+        <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate flex-1 mr-2">
+          {stock.name}
+        </h3>
+        <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded-full">
+          {stock.category}
+        </span>
+      </div>
+      
+      {stock.notes && (
+        <p className="text-xs text-gray-600 dark:text-gray-300 mb-3 line-clamp-2">
+          {stock.notes}
+        </p>
+      )}
+      
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <span className="text-gray-500 dark:text-gray-400">Quantity:</span>
+          <p className="font-medium text-gray-900 dark:text-white">
+            {stock.quantity} {stock.measurementUnit}
+          </p>
+        </div>
+        <div>
+          <span className="text-gray-500 dark:text-gray-400">Unit Price:</span>
+          <p className="font-medium text-gray-900 dark:text-white">
+            UGX {stock.unitPrice?.toLocaleString()}
+          </p>
+        </div>
+        <div className="col-span-2">
+          <span className="text-gray-500 dark:text-gray-400">Total Value:</span>
+          <p className="font-semibold text-green-600 dark:text-green-400">
+            UGX {stock.totalValue?.toLocaleString()}
+          </p>
+        </div>
+      </div>
+      
+      {!isSystemStock && (
+        <div className="flex justify-end space-x-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+          <button
+            onClick={() => handleEdit(stock)}
+            className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded transition-colors"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => handleDelete(stock._id)}
+            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // Stock Table for larger screens (hidden on mobile)
+  const StockTable = ({ stocks, isSystemStock = false }) => (
+    <div className="hidden md:block overflow-x-auto">
       <table className="w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead className="bg-gray-50 dark:bg-gray-700">
           <tr>
@@ -313,9 +372,18 @@ const MyStock = () => {
     </div>
   );
 
+  // Stock Cards Grid for mobile (hidden on larger screens)
+  const StockCardsGrid = ({ stocks, isSystemStock = false }) => (
+    <div className="md:hidden grid grid-cols-1 gap-3">
+      {stocks.map((stock) => (
+        <StockCard key={stock._id} stock={stock} isSystemStock={isSystemStock} />
+      ))}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-2">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-2">
         <div className="animate-pulse">
           <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
           <div className="space-y-3">
@@ -328,15 +396,15 @@ const MyStock = () => {
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-2">
       <h2 className="text-lg font-semibold mb-4 dark:text-white">MyStock</h2>
       
       {/* Tabs */}
-      <div className="border-b border-gray-200 dark:border-gray-700 mb-6">
-        <nav className="-mb-px flex space-x-8">
+      <div className="border-b border-gray-200 dark:border-gray-700 mb-4">
+        <nav className="-mb-px flex space-x-4">
           <button
             onClick={() => setActiveTab('system')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+            className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeTab === 'system'
                 ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
@@ -346,7 +414,7 @@ const MyStock = () => {
           </button>
           <button
             onClick={() => setActiveTab('manual')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+            className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
               activeTab === 'manual'
                 ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
@@ -360,41 +428,42 @@ const MyStock = () => {
       {/* Content based on active tab */}
       {activeTab === 'system' ? (
         <div>
-          <div className="flex justify-between items-center mb-4">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+            <p className="text-xs text-gray-600 dark:text-gray-300 flex-1">
               System stock is automatically updated when you receive and certify orders from wholesalers.
             </p>
             <button
               onClick={syncSystemStocks}
               disabled={syncing}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
+              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50 whitespace-nowrap"
             >
               {syncing ? 'Syncing...' : 'Sync System Stock'}
             </button>
           </div>
           {systemStocks.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-sm text-gray-500 dark:text-gray-400 italic mb-4">
+            <div className="text-center py-6">
+              <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-3">
                 No system stock items yet. Your stock will appear here after you receive and certify orders.
               </p>
               <button
                 onClick={syncSystemStocks}
                 disabled={syncing}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
               >
                 {syncing ? 'Syncing...' : 'Sync Existing Orders'}
               </button>
             </div>
           ) : (
-            <div className="h-72 overflow-y-scroll">
-              {renderStockTable(systemStocks, true)}
-            </div>
+            <>
+              <StockTable stocks={systemStocks} isSystemStock={true} />
+              <StockCardsGrid stocks={systemStocks} isSystemStock={true} />
+            </>
           )}
         </div>
       ) : (
         <div>
-          <div className="flex justify-between items-center mb-4">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+            <p className="text-xs text-gray-600 dark:text-gray-300 flex-1">
               Add and manage your manual stock items here.
             </p>
             <button
@@ -411,21 +480,21 @@ const MyStock = () => {
                   notes: ''
                 });
               }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap"
             >
               Add Stock Item
             </button>
           </div>
 
           {showAddForm && (
-            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-4">
-              <h3 className="text-lg font-medium mb-3 dark:text-white">
+            <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-md mb-4">
+              <h3 className="text-base font-medium mb-3 dark:text-white">
                 {editingStock ? 'Edit Stock Item' : 'Add New Stock Item'}
               </h3>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Product Name *
                     </label>
                     <input
@@ -433,11 +502,11 @@ const MyStock = () => {
                       required
                       value={formData.name}
                       onChange={(e) => setFormData({...formData, name: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Category *
                     </label>
                     <input
@@ -445,31 +514,17 @@ const MyStock = () => {
                       required
                       value={formData.category}
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Quantity *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      step="0.01"
-                      value={formData.quantity}
-                      onChange={(e) => setFormData({...formData, quantity: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Measurement Unit *
                     </label>
                     <select
                       value={formData.measurementUnit}
                       onChange={(e) => setFormData({...formData, measurementUnit: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                     >
                       <option value="kg">Kilograms (kg)</option>
                       <option value="g">Grams (g)</option>
@@ -483,7 +538,21 @@ const MyStock = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Quantity *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="0.01"
+                      value={formData.quantity}
+                      onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Unit Price (UGX) *
                     </label>
                     <input
@@ -493,11 +562,11 @@ const MyStock = () => {
                       step="0.01"
                       value={formData.unitPrice}
                       onChange={(e) => setFormData({...formData, unitPrice: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Minimum Stock Level
                     </label>
                     <input
@@ -506,22 +575,22 @@ const MyStock = () => {
                       step="0.01"
                       value={formData.minStockLevel}
                       onChange={(e) => setFormData({...formData, minStockLevel: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Notes
                   </label>
                   <textarea
                     value={formData.notes}
                     onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
+                    rows={2}
+                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:text-white"
                   />
                 </div>
-                <div className="flex justify-end space-x-3">
+                <div className="flex justify-end space-x-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -537,13 +606,13 @@ const MyStock = () => {
                         notes: ''
                       });
                     }}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600"
+                    className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium"
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium"
                   >
                     {editingStock ? 'Update' : 'Add'} Stock Item
                   </button>
@@ -553,13 +622,14 @@ const MyStock = () => {
           )}
 
           {manualStocks.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+            <p className="text-xs text-gray-500 dark:text-gray-400 italic text-center py-4">
               No manual stock items yet. Click "Add Stock Item" to get started.
             </p>
           ) : (
-            <div className="h-75 overflow-y-scroll">
-              {renderStockTable(manualStocks)}
-            </div>
+            <>
+              <StockTable stocks={manualStocks} />
+              <StockCardsGrid stocks={manualStocks} />
+            </>
           )}
         </div>
       )}

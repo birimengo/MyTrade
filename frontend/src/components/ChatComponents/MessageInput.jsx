@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { FaPaperPlane, FaMicrophone, FaPaperclip, FaTimes, FaFile, FaImage } from 'react-icons/fa';
 import VoiceRecorder from './VoiceRecorder';
 
-const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVoiceMessage }) => {
+const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVoiceMessage, isMobile = false }) => {
   const [message, setMessage] = useState('');
   const [showFileUploader, setShowFileUploader] = useState(false);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
@@ -148,6 +148,12 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // NEW: Responsive sizes
+  const padding = isMobile ? 'p-1' : 'p-2';
+  const buttonSize = isMobile ? 'p-1.5' : 'p-2';
+  const iconSize = isMobile ? 'text-xs' : 'text-sm';
+  const inputSize = isMobile ? 'p-1.5 text-xs' : 'p-1.5 text-sm';
+
   return (
     <div className="border-t border-gray-200 dark:border-gray-700">
       {/* Voice Recorder */}
@@ -155,21 +161,22 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
         <VoiceRecorder 
           onRecordingComplete={handleVoiceRecordingComplete}
           onCancel={() => setShowVoiceRecorder(false)}
+          isMobile={isMobile}
         />
       )}
 
       {/* File Uploader */}
       {showFileUploader && selectedFile && (
-        <div className="p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+        <div className={`${padding} border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700`}>
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-gray-200 dark:bg-gray-600 rounded-lg">
+            <div className={`${isMobile ? 'p-1.5' : 'p-2'} bg-gray-200 dark:bg-gray-600 rounded-lg`}>
               {getFileIcon(selectedFile)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              <p className={`${isMobile ? 'text-xs' : 'text-sm'} font-medium text-gray-900 dark:text-white truncate`}>
                 {selectedFile.name}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-gray-500 dark:text-gray-400`}>
                 {formatFileSize(selectedFile.size)}
               </p>
             </div>
@@ -178,11 +185,11 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
               className="p-1 text-red-500 hover:text-red-700"
               disabled={uploading}
             >
-              <FaTimes />
+              <FaTimes className={iconSize} />
             </button>
             <button
               onClick={handleFileUpload}
-              className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+              className={`bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 ${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'}`}
               disabled={uploading}
             >
               {uploading ? 'Uploading...' : 'Send'}
@@ -192,28 +199,28 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
       )}
 
       {/* Message Input */}
-      <form onSubmit={handleSubmit} className="p-2">
-        <div className="flex space-x-2">
+      <form onSubmit={handleSubmit} className={padding}>
+        <div className={`flex ${isMobile ? 'space-x-1' : 'space-x-2'}`}>
           {/* Voice Message Button */}
           <button
             type="button"
             onClick={toggleVoiceRecorder}
-            className={`p-2 rounded-md ${
+            className={`${buttonSize} rounded-md ${
               showVoiceRecorder 
                 ? 'bg-red-500 text-white' 
                 : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
-            <FaMicrophone />
+            <FaMicrophone className={iconSize} />
           </button>
 
           {/* File Attachment Button */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className={`${buttonSize} text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200`}
           >
-            <FaPaperclip />
+            <FaPaperclip className={iconSize} />
           </button>
           
           {/* Hidden file input */}
@@ -231,7 +238,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
             value={message}
             onChange={handleInputChange}
             placeholder="Type a message..."
-            className="flex-1 p-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            className={`flex-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${inputSize}`}
             disabled={showVoiceRecorder}
           />
 
@@ -239,9 +246,9 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
           <button
             type="submit"
             disabled={!message.trim() || showVoiceRecorder}
-            className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            className={`${buttonSize} bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200`}
           >
-            <FaPaperPlane className="text-sm" />
+            <FaPaperPlane className={iconSize} />
           </button>
         </div>
       </form>

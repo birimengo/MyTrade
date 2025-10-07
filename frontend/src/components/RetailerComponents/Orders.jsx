@@ -243,7 +243,7 @@ const Orders = () => {
           <button
             key="delete"
             onClick={() => handleDeleteOrder(order._id)}
-            className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+            className="px-1.5 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
             title="Delete Order"
           >
             Delete
@@ -257,7 +257,7 @@ const Orders = () => {
           <button
             key="cancel"
             onClick={() => setSelectedOrder({ ...order, action: 'cancel' })}
-            className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
+            className="px-1.5 py-0.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
             title="Cancel Order"
           >
             Cancel
@@ -271,7 +271,7 @@ const Orders = () => {
           <button
             key="certify"
             onClick={() => handleDeliveryCertification(order, true)}
-            className="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-xs"
+            className="px-1.5 py-0.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-xs"
             title="Certify Delivery"
           >
             ✓ Certify
@@ -281,7 +281,7 @@ const Orders = () => {
           <button
             key="dispute"
             onClick={() => handleDeliveryCertification(order, false)}
-            className="px-2 py-1 bg-rose-600 text-white rounded hover:bg-rose-700 text-xs"
+            className="px-1.5 py-0.5 bg-rose-600 text-white rounded hover:bg-rose-700 text-xs"
             title="Dispute Delivery"
           >
             ✗ Dispute
@@ -296,7 +296,7 @@ const Orders = () => {
           <button
             key="accept"
             onClick={() => handleStatusUpdate(order._id, 'accepted')}
-            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+            className="px-1.5 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
             title="Accept Order"
           >
             Accept
@@ -304,7 +304,7 @@ const Orders = () => {
           <button
             key="reject"
             onClick={() => setSelectedOrder({ ...order, action: 'reject' })}
-            className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+            className="px-1.5 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
             title="Reject Order"
           >
             Reject
@@ -317,7 +317,7 @@ const Orders = () => {
           <button
             key="process"
             onClick={() => handleStatusUpdate(order._id, 'processing')}
-            className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
+            className="px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
             title="Process Order"
           >
             Process
@@ -327,7 +327,7 @@ const Orders = () => {
           <button
             key="cancel"
             onClick={() => setSelectedOrder({ ...order, action: 'cancel' })}
-            className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
+            className="px-1.5 py-0.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
             title="Cancel Order"
           >
             Cancel
@@ -340,7 +340,7 @@ const Orders = () => {
           <button
             key="assign"
             onClick={() => setSelectedOrder({ ...order, action: 'assign' })}
-            className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-xs"
+            className="px-1.5 py-0.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-xs"
             title="Assign to Transporter"
           >
             Assign
@@ -350,7 +350,7 @@ const Orders = () => {
           <button
             key="cancel"
             onClick={() => setSelectedOrder({ ...order, action: 'cancel' })}
-            className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
+            className="px-1.5 py-0.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
             title="Cancel Order"
           >
             Cancel
@@ -364,7 +364,7 @@ const Orders = () => {
           <button
             key="accept-return"
             onClick={() => setSelectedOrder({ ...order, action: 'accept_return' })}
-            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+            className="px-1.5 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
             title="Accept Return"
           >
             Accept Return
@@ -374,7 +374,7 @@ const Orders = () => {
           <button
             key="reject-return"
             onClick={() => setSelectedOrder({ ...order, action: 'reject_return' })}
-            className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+            className="px-1.5 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
             title="Reject Return"
           >
             Reject Return
@@ -388,7 +388,7 @@ const Orders = () => {
           <button
             key="resolve"
             onClick={() => setSelectedOrder({ ...order, action: 'resolve' })}
-            className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
+            className="px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
             title="Resolve Dispute"
           >
             Resolve
@@ -403,7 +403,7 @@ const Orders = () => {
           <button
             key="transit"
             onClick={() => handleStatusUpdate(order._id, 'in_transit')}
-            className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 text-xs"
+            className="px-1.5 py-0.5 bg-orange-600 text-white rounded hover:bg-orange-700 text-xs"
             title="Start Transport"
           >
             Start
@@ -413,7 +413,7 @@ const Orders = () => {
           <button
             key="cancel"
             onClick={() => setSelectedOrder({ ...order, action: 'cancel' })}
-            className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
+            className="px-1.5 py-0.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
             title="Cancel Transport"
           >
             Cancel
@@ -426,7 +426,7 @@ const Orders = () => {
           <button
             key="deliver"
             onClick={() => handleStatusUpdate(order._id, 'delivered')}
-            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+            className="px-1.5 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
             title="Mark as Delivered"
           >
             Deliver
@@ -436,7 +436,7 @@ const Orders = () => {
           <button
             key="cancel"
             onClick={() => setSelectedOrder({ ...order, action: 'cancel' })}
-            className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
+            className="px-1.5 py-0.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs"
             title="Cancel Transport"
           >
             Cancel
@@ -450,7 +450,7 @@ const Orders = () => {
           <button
             key="return"
             onClick={() => setSelectedOrder({ ...order, action: 'return' })}
-            className="px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-xs"
+            className="px-1.5 py-0.5 bg-amber-600 text-white rounded hover:bg-amber-700 text-xs"
             title="Return to Wholesaler"
           >
             Return
@@ -475,9 +475,9 @@ const Orders = () => {
     if (!selectedOrder) return null;
     
     return (
-      <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-          <h3 className="text-lg font-semibold mb-4 dark:text-white">
+      <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-3">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 w-full max-w-sm mx-2">
+          <h3 className="text-base font-semibold mb-3 dark:text-white">
             {selectedOrder.action === 'cancel' && 'Cancel Order'}
             {selectedOrder.action === 'reject' && 'Reject Order'}
             {selectedOrder.action === 'assign' && 'Assign to Transporter'}
@@ -489,12 +489,12 @@ const Orders = () => {
           </h3>
           
           {(selectedOrder.action === 'cancel' || selectedOrder.action === 'reject' || selectedOrder.action === 'dispute' || selectedOrder.action === 'reject_return' || selectedOrder.action === 'return') && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Reason
               </label>
               <textarea
-                className="w-full p-2 border border-gray-300 rounded dark:bg-gray-700 dark:text-white"
+                className="w-full p-2 border border-gray-300 rounded text-xs dark:bg-gray-700 dark:text-white"
                 rows="3"
                 placeholder={
                   selectedOrder.action === 'dispute' 
@@ -519,13 +519,13 @@ const Orders = () => {
           )}
           
           {selectedOrder.action === 'assign' && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Transporter ID
               </label>
               <input
                 type="text"
-                className="w-full p-2 border border-gray-300 rounded dark:bg-gray-700 dark:text-white"
+                className="w-full p-2 border border-gray-300 rounded text-xs dark:bg-gray-700 dark:text-white"
                 placeholder="Enter transporter ID"
                 onChange={(e) => setSelectedOrder({
                   ...selectedOrder, 
@@ -536,12 +536,12 @@ const Orders = () => {
           )}
           
           {selectedOrder.action === 'resolve' && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Resolution Notes
               </label>
               <textarea
-                className="w-full p-2 border border-gray-300 rounded dark:bg-gray-700 dark:text-white"
+                className="w-full p-2 border border-gray-300 rounded text-xs dark:bg-gray-700 dark:text-white"
                 rows="3"
                 placeholder="Enter resolution notes..."
                 onChange={(e) => setSelectedOrder({
@@ -559,19 +559,19 @@ const Orders = () => {
                       reassign: e.target.checked 
                     })}
                   />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Reassign to another transporter</span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300">Reassign to another transporter</span>
                 </label>
               </div>
             </div>
           )}
           
-          <div className="flex justify-end space-x-3">
+          <div className="flex justify-end space-x-2">
             <button
               onClick={() => {
                 setSelectedOrder(null);
                 setDisputeReason('');
               }}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+              className="px-3 py-1.5 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 text-xs"
             >
               Cancel
             </button>
@@ -617,7 +617,7 @@ const Orders = () => {
                   );
                 }
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
               disabled={
                 (selectedOrder.action === 'dispute' && !disputeReason.trim()) ||
                 (selectedOrder.action === 'resolve' && !selectedOrder.resolutionNotes?.trim()) ||
@@ -714,9 +714,9 @@ const Orders = () => {
 
   if (!user) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-2">
-        <h2 className="text-lg font-semibold mb-4 dark:text-white">Orders</h2>
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-2">
+        <h2 className="text-base font-semibold mb-3 dark:text-white">Orders</h2>
+        <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-xs">
           Please log in to view your orders
         </div>
       </div>
@@ -725,10 +725,10 @@ const Orders = () => {
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-2">
-        <h2 className="text-lg font-semibold mb-4 dark:text-white">Orders</h2>
-        <div className="flex justify-center items-center h-40">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-2">
+        <h2 className="text-base font-semibold mb-3 dark:text-white">Orders</h2>
+        <div className="flex justify-center items-center h-32">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
         </div>
       </div>
     );
@@ -748,77 +748,90 @@ const Orders = () => {
   });
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mt-2">
-      <h2 className="text-lg font-semibold dark:text-white mb-4">My Orders</h2>
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 mt-2">
+      <h2 className="text-base font-semibold dark:text-white mb-3">My Orders</h2>
       
       {/* Search and Filter */}
-      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 mb-4">
-        <div className="relative flex-1">
-          <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-            <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 mb-3">
+        <div className="relative flex-1 min-w-0">
+          <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+            <svg className="w-3 h-3 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </div>
           <input
             type="text"
             placeholder="Search by product or business name..."
-            className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white dark:border-gray-600"
+            className="w-full pl-7 pr-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white dark:border-gray-600"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
         
-        <div className="flex items-center space-x-2 flex-shrink-0">
-          <span className="text-sm text-gray-600 dark:text-gray-400">Filter by:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-          >
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="accepted">Accepted</option>
-            <option value="rejected">Rejected</option>
-            <option value="processing">Processing</option>
-            <option value="assigned_to_transporter">Assigned</option>
-            <option value="accepted_by_transporter">Accepted by Transporter</option>
-            <option value="in_transit">In Transit</option>
-            <option value="delivered">Delivered</option>
-            <option value="certified">Certified</option>
-            <option value="disputed">Disputed</option>
-            <option value="return_to_wholesaler">Return Requested</option>
-            <option value="return_accepted">Return Accepted</option>
-            <option value="return_rejected">Return Rejected</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+        <div className="flex items-center space-x-1 flex-shrink-0">
+          <span className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Filter:</span>
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setCurrentPage(1);
+                
+              }}
+              className="border border-gray-300 rounded px-1.5 py-1 text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white w-28 appearance-none cursor-pointer"
+              style={{
+                maxHeight: '120px',
+                overflowY: 'auto'
+              }}
+              size="1"
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="accepted">Accepted</option>
+              <option value="rejected">Rejected</option>
+              <option value="processing">Processing</option>
+              <option value="assigned_to_transporter">Assigned</option>
+              <option value="accepted_by_transporter">Accepted by Transporter</option>
+              <option value="in_transit">In Transit</option>
+              <option value="delivered">Delivered</option>
+              <option value="certified">Certified</option>
+              <option value="disputed">Disputed</option>
+              <option value="return_to_wholesaler">Return Requested</option>
+              <option value="return_accepted">Return Accepted</option>
+              <option value="return_rejected">Return Rejected</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 text-gray-700 dark:text-gray-300">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
         </div>
       </div>
 
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded mb-3 text-sm dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-2 py-1 rounded mb-2 text-xs dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
           {error}
         </div>
       )}
 
       {successMessage && (
-        <div className="bg-green-100 border border-green-400 text-green-700 px-3 py-2 rounded mb-3 text-sm dark:bg-green-900/20 dark:border-green-800 dark:text-green-300">
+        <div className="bg-green-100 border border-green-400 text-green-700 px-2 py-1 rounded mb-2 text-xs dark:bg-green-900/20 dark:border-green-800 dark:text-green-300">
           {successMessage}
         </div>
       )}
 
       {/* Orders Container with Fixed Height and Scroll */}
-      <div className="h-[390px] overflow-y-auto">
+      <div className="h-[320px] overflow-y-auto">
         {filteredOrders.length === 0 ? (
-          <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
+          <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs">
             No orders found matching your criteria.
           </div>
         ) : (
           <>
             {/* Orders Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredOrders.map((order) => {
                 const images = order.product?.images || [];
                 const currentImageIndex = activeImageIndexes[order._id] || 0;
@@ -829,21 +842,21 @@ const Orders = () => {
                 return (
                   <div 
                     key={order._id} 
-                    className="bg-white dark:bg-gray-700 rounded-lg shadow-sm border border-gray-200 dark:border-gray-600 p-4 flex flex-col"
+                    className="bg-white dark:bg-gray-700 rounded shadow-sm border border-gray-200 dark:border-gray-600 p-3 flex flex-col"
                   >
                     {/* Order Header */}
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
+                    <div className="flex justify-between items-start mb-1.5">
+                      <h3 className="font-semibold text-gray-900 dark:text-white text-xs truncate flex-1 mr-1">
                         Order #{order._id.slice(-6).toUpperCase()}
                       </h3>
-                      <span className={`px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                      <span className={`px-1.5 py-0.5 inline-flex text-xs leading-4 font-semibold rounded-full flex-shrink-0 ${getStatusColor(order.status)}`}>
                         {order.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                     
                     {/* Certification Status */}
                     {certificationStatus && (
-                      <div className={`mb-2 p-2 rounded-md text-xs ${
+                      <div className={`mb-1.5 p-1.5 rounded text-xs ${
                         order.status === 'certified' 
                           ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' 
                           : 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300'
@@ -851,14 +864,14 @@ const Orders = () => {
                         <p className="font-medium">{certificationStatus.text}</p>
                         {certificationStatus.date && <p>On: {certificationStatus.date}</p>}
                         {order.status === 'disputed' && order.deliveryDispute?.reason && (
-                          <p className="mt-1">Reason: {order.deliveryDispute.reason}</p>
+                          <p className="mt-0.5">Reason: {order.deliveryDispute.reason}</p>
                         )}
                       </div>
                     )}
                     
                     {/* Return Details */}
                     {(order.status === 'return_to_wholesaler' || order.status === 'return_accepted' || order.status === 'return_rejected') && order.returnDetails && (
-                      <div className={`mb-2 p-2 rounded-md text-xs ${
+                      <div className={`mb-1.5 p-1.5 rounded text-xs ${
                         order.status === 'return_accepted' 
                           ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' 
                           : order.status === 'return_rejected'
@@ -873,53 +886,53 @@ const Orders = () => {
                             : 'Return Requested'}
                         </p>
                         {order.returnDetails.returnReason && (
-                          <p className="mt-1">Reason: {order.returnDetails.returnReason}</p>
+                          <p className="mt-0.5">Reason: {order.returnDetails.returnReason}</p>
                         )}
                         {order.returnDetails.returnRejectionReason && (
-                          <p className="mt-1">Rejection Reason: {order.returnDetails.returnRejectionReason}</p>
+                          <p className="mt-0.5">Rejection Reason: {order.returnDetails.returnRejectionReason}</p>
                         )}
                       </div>
                     )}
                     
                     {/* Product Image with Carousel */}
-                    <div className="relative mb-3">
+                    <div className="relative mb-2">
                       {currentImage ? (
-                        <div className="relative w-full h-32">
+                        <div className="relative w-full h-24">
                           <img
                             src={currentImage}
                             alt={order.product?.name}
-                            className="w-full h-full object-cover rounded-md"
+                            className="w-full h-full object-cover rounded"
                             onError={(e) => { e.target.src = placeholderImage; }}
                           />
                           {hasMultipleImages && (
                             <>
                               <button
                                 onClick={() => handleImageNavigation(order._id, 'prev', images.length)}
-                                className="absolute left-1 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-75 transition-opacity duration-200 focus:outline-none"
+                                className="absolute left-0.5 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-0.5 rounded-full hover:bg-opacity-75 transition-opacity duration-200 focus:outline-none"
                                 aria-label="Previous image"
                               >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                                 </svg>
                               </button>
                               <button
                                 onClick={() => handleImageNavigation(order._id, 'next', images.length)}
-                                className="absolute right-1 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-75 transition-opacity duration-200 focus:outline-none"
+                                className="absolute right-0.5 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-0.5 rounded-full hover:bg-opacity-75 transition-opacity duration-200 focus:outline-none"
                                 aria-label="Next image"
                               >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                 </svg>
                               </button>
-                              <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
+                              <div className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white text-xs px-0.5 rounded">
                                 {currentImageIndex + 1}/{images.length}
                               </div>
                             </>
                           )}
                         </div>
                       ) : (
-                        <div className="w-full h-32 bg-gray-200 rounded-md flex items-center justify-center dark:bg-gray-600">
-                          <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <div className="w-full h-24 bg-gray-200 rounded flex items-center justify-center dark:bg-gray-600">
+                          <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
                         </div>
@@ -927,11 +940,11 @@ const Orders = () => {
                     </div>
 
                     {/* Other Details */}
-                    <div className="flex-1 mb-3">
-                      <p className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                    <div className="flex-1 mb-2">
+                      <p className="font-medium text-gray-900 dark:text-white text-xs truncate">
                         {order.product?.name || 'N/A'}
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {order.quantity} {order.measurementUnit}
                       </p>
                       <p className="text-xs text-green-600 font-semibold dark:text-green-400">
@@ -939,8 +952,8 @@ const Orders = () => {
                       </p>
                     </div>
                     
-                    <div className="text-xs text-gray-600 dark:text-gray-400">
-                      <p>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                      <p className="truncate">
                         {user.role === 'retailer' 
                           ? `By: ${order.wholesaler?.businessName || order.wholesaler?.firstName || 'N/A'}`
                           : `For: ${order.retailer?.businessName || order.retailer?.firstName || 'N/A'}`
@@ -953,7 +966,7 @@ const Orders = () => {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex items-center gap-1 mt-auto pt-2 border-t border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center gap-1 mt-auto pt-1.5 border-t border-gray-200 dark:border-gray-600">
                       {getActionButtons(order)}
                     </div>
                   </div>
@@ -966,12 +979,12 @@ const Orders = () => {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center mt-4">
+        <div className="flex justify-center mt-3">
           <nav className="flex items-center space-x-1">
             <button
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
-              className="px-2 py-1 rounded border border-gray-300 disabled:opacity-50 text-xs dark:bg-gray-700 dark:text-white"
+              className="px-1.5 py-0.5 rounded border border-gray-300 disabled:opacity-50 text-xs dark:bg-gray-700 dark:text-white"
             >
               Prev
             </button>
@@ -992,7 +1005,7 @@ const Orders = () => {
                 <button
                   key={pageNum}
                   onClick={() => setCurrentPage(pageNum)}
-                  className={`px-2 py-1 rounded text-xs ${
+                  className={`px-1.5 py-0.5 rounded text-xs ${
                     currentPage === pageNum
                       ? 'bg-blue-600 text-white'
                       : 'border border-gray-300 dark:bg-gray-700 dark:text-white'
@@ -1006,7 +1019,7 @@ const Orders = () => {
             <button
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
-              className="px-2 py-1 rounded border border-gray-300 disabled:opacity-50 text-xs dark:bg-gray-700 dark:text-white"
+              className="px-1.5 py-0.5 rounded border border-gray-300 disabled:opacity-50 text-xs dark:bg-gray-700 dark:text-white"
             >
               Next
             </button>

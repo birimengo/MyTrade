@@ -6,6 +6,7 @@ const InstallPWA = () => {
   const [isInstalled, setIsInstalled] = useState(false);
   const [showManualInstructions, setShowManualInstructions] = useState(false);
   const [pwaStatus, setPwaStatus] = useState('checking');
+  const [debugInfo, setDebugInfo] = useState({});
 
   useEffect(() => {
     const checkPWARequirements = () => {
@@ -14,30 +15,36 @@ const InstallPWA = () => {
         hasServiceWorker: 'serviceWorker' in navigator,
         hasManifest: !!document.querySelector('link[rel="manifest"]'),
         isStandalone: window.matchMedia('(display-mode: standalone)').matches,
+        isFullscreen: window.matchMedia('(display-mode: fullscreen)').matches,
+        isMinimalUI: window.matchMedia('(display-mode: minimal-ui)').matches,
         userAgent: navigator.userAgent,
+        url: window.location.href,
       };
 
       console.log('🔍 PWA Status Check:', status);
+      setDebugInfo(status);
       return status;
     };
 
     const handler = (e) => {
       e.preventDefault();
-      console.log('🚀 beforeinstallprompt event fired - Browser will show install button in address bar');
-      setSupportsPWA(true);
+      console.log('🚀 beforeinstallprompt event fired!');
+      
+      // Store the event for later use
       setPromptInstall(e);
+      setSupportsPWA(true);
       setPwaStatus('ready');
       
-      // The browser will now show the install icon in the address bar
-      // We can also show our custom button as an alternative
+      // Store in global for persistence
+      window.deferredPrompt = e;
     };
 
     const checkInstalled = () => {
       const status = checkPWARequirements();
       
-      const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-      const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
-      const isMinimalUI = window.matchMedia('(display-mode: minimal-ui)').matches;
+      const isStandalone = status.isStandalone;
+      const isFullscreen = status.isFullscreen;
+      const isMinimalUI = status.isMinimalUI;
       const isIOSStandalone = window.navigator.standalone;
 
       if (isStandalone || isFullscreen || isMinimalUI || isIOSStandalone) {
@@ -47,83 +54,81 @@ const InstallPWA = () => {
         return true;
       }
 
-      // For production, show button if basic PWA requirements are met
-      if (process.env.NODE_ENV === 'production') {
-        const meetsBasicRequirements = status.isHTTPS && status.hasManifest && status.hasServiceWorker;
-        if (meetsBasicRequirements && !isInstalled) {
-          console.log('🏗️ Basic PWA requirements met, showing install option');
-          setPwaStatus('available');
-          setSupportsPWA(true);
-        }
+      // Check if we have a stored prompt
+      if (window.deferredPrompt) {
+        setPromptInstall(window.deferredPrompt);
+        setSupportsPWA(true);
+        setPwaStatus('ready');
+      }
+
+      // Always show in development for testing
+      if (process.env.NODE_ENV === 'development') {
+        setSupportsPWA(true);
+        setPwaStatus('development');
       }
       
+      // Show in production if basic requirements are met
+      if (process.env.NODE_ENV === 'production' && status.isHTTPS && status.hasManifest) {
+        setPwaStatus('available');
+        setSupportsPWA(true);
+      }
+
       return false;
     };
 
     checkInstalled();
 
-    // Listen for beforeinstallprompt event - this triggers browser install button
     window.addEventListener('beforeinstallprompt', handler);
-
-    // Listen for app installed event
     window.addEventListener('appinstalled', (evt) => {
-      console.log('🎉 App was successfully installed');
+      console.log('🎉 App installed successfully!');
       setIsInstalled(true);
       setPromptInstall(null);
       setPwaStatus('installed');
+      window.deferredPrompt = null;
     });
 
-    // Check if deferredPrompt exists (some browsers store it)
-    if (window.deferredPrompt) {
-      setPromptInstall(window.deferredPrompt);
-      setSupportsPWA(true);
-      setPwaStatus('ready');
-    }
-
-    const timeoutId = setTimeout(() => {
-      checkInstalled();
-    }, 3000);
+    // Re-check after components load
+    const timeoutId = setTimeout(checkInstalled, 2000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handler);
       clearTimeout(timeoutId);
     };
-  }, [isInstalled]);
+  }, []);
 
   const installApp = async (evt) => {
     evt.preventDefault();
+    evt.stopPropagation();
     
+    console.log('🔄 Install button clicked', { hasPrompt: !!promptInstall });
+
     if (promptInstall) {
       try {
-        console.log('🔄 Triggering install prompt...');
+        console.log('📲 Showing native install prompt...');
         
-        // Show the native browser install prompt
-        const result = await promptInstall.prompt();
+        // Show the native prompt
+        promptInstall.prompt();
         
-        console.log('📝 Install prompt result:', result);
+        // Wait for user decision
+        const choiceResult = await promptInstall.userChoice;
+        console.log('✅ User choice:', choiceResult);
         
-        // Wait for the user to respond to the prompt
-        const { outcome } = await result;
-        
-        if (outcome === 'accepted') {
-          console.log('✅ User accepted the install');
+        if (choiceResult.outcome === 'accepted') {
+          console.log('🎉 User accepted install');
           setPromptInstall(null);
           setPwaStatus('installed');
-          
-          // Clear the deferred prompt
-          if (window.deferredPrompt) {
-            window.deferredPrompt = null;
-          }
+          window.deferredPrompt = null;
         } else {
-          console.log('❌ User dismissed the install');
+          console.log('❌ User declined install');
+          // Keep the prompt for next time
         }
         
       } catch (error) {
-        console.error('💥 Error during installation:', error);
+        console.error('💥 Install error:', error);
         setShowManualInstructions(true);
       }
     } else {
-      console.log('❌ No install prompt available, showing manual instructions');
+      console.log('📋 No native prompt, showing manual instructions');
       setShowManualInstructions(true);
     }
   };
@@ -132,20 +137,19 @@ const InstallPWA = () => {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const isChrome = /Chrome/.test(navigator.userAgent);
 
-  // Show button if not installed AND (supports PWA OR in development OR PWA available)
+  // Show button conditions
   const shouldShowButton = !isInstalled && (
     supportsPWA || 
-    process.env.NODE_ENV === 'development' || 
+    process.env.NODE_ENV === 'development' ||
     pwaStatus === 'available'
   );
 
-  console.log('🎯 Install Button State:', {
-    shouldShowButton,
-    isInstalled,
-    supportsPWA,
+  console.log('🎯 Button visibility:', { 
+    shouldShowButton, 
+    isInstalled, 
+    supportsPWA, 
     pwaStatus,
-    hasPrompt: !!promptInstall,
-    environment: process.env.NODE_ENV
+    hasPrompt: !!promptInstall 
   });
 
   if (!shouldShowButton) {
@@ -154,53 +158,61 @@ const InstallPWA = () => {
 
   return (
     <>
-      {/* Main Install Button */}
-      <div className="fixed bottom-4 right-4 z-50 animate-fade-in">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 max-w-xs">
-          <div className="flex items-start space-x-2">
+      {/* Install Button */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 max-w-xs animate-fade-in">
+          <div className="flex items-center space-x-2">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-                <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-6 h-6 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                <svg className="w-3 h-3 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
               </div>
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">
-                Install App
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                Get native app experience
-              </p>
-              <div className="mt-2 flex space-x-1">
-                <button
-                  onClick={installApp}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 text-xs font-medium rounded-md transition-colors duration-200"
-                >
-                  {promptInstall ? 'Install Now' : 'How to Install'}
-                </button>
-                <button
-                  onClick={() => setShowManualInstructions(true)}
-                  className="px-2 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors duration-200"
-                  title="Show installation instructions"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
+              <button
+                onClick={installApp}
+                className="w-full text-left"
+              >
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">
+                  Install App
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {promptInstall ? 'Click to install' : 'Get app experience'}
+                </p>
+              </button>
             </div>
+            <button
+              onClick={() => setShowManualInstructions(true)}
+              className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              title="Installation help"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
           </div>
+          
+          {/* Install button */}
+          <button
+            onClick={installApp}
+            className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1.5 text-xs font-medium rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            <span>{promptInstall ? 'Install Now' : 'Show Instructions'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Manual Instructions Modal */}
+      {/* Instructions Modal */}
       {showManualInstructions && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                How to Install
+                Install TRADE App
               </h3>
               <button
                 onClick={() => setShowManualInstructions(false)}
@@ -214,81 +226,81 @@ const InstallPWA = () => {
             
             <div className="space-y-3">
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded p-2">
-                <p className="text-xs text-blue-800 dark:text-blue-200 font-medium">
-                  💡 Look for the install icon in your browser's address bar!
+                <p className="text-xs text-blue-800 dark:text-blue-200">
+                  <strong>Tip:</strong> Look for the install icon (+) in your browser's address bar
                 </p>
               </div>
 
               {isIOS ? (
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 font-medium">
-                    iOS Installation:
-                  </p>
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">iOS:</p>
                   <ol className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-decimal list-inside">
-                    <li>Tap the <strong>Share button</strong> <span className="inline-block">⎙</span> at the bottom</li>
-                    <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
-                    <li>Tap <strong>"Add"</strong> in the top right corner</li>
+                    <li>Tap Share button <span className="inline-block">⎙</span></li>
+                    <li>Select "Add to Home Screen"</li>
+                    <li>Tap "Add"</li>
                   </ol>
                 </div>
               ) : isMobile ? (
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 font-medium">
-                    Android Installation:
-                  </p>
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Android:</p>
                   <ol className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-decimal list-inside">
-                    <li>Tap the <strong>menu button (⋮)</strong> in Chrome</li>
-                    <li>Tap <strong>"Install app"</strong> or "Add to Home screen"</li>
-                    <li>Confirm the installation</li>
+                    <li>Tap Chrome menu (⋮)</li>
+                    <li>Tap "Install app"</li>
+                    <li>Confirm installation</li>
                   </ol>
                 </div>
               ) : (
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 font-medium">
-                    Desktop Installation:
-                  </p>
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Desktop:</p>
                   <ol className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-decimal list-inside">
-                    <li>Look for the <strong>install icon (+)</strong> in the address bar</li>
-                    <li>Or go to <strong>Chrome menu → "Install TRADE"</strong></li>
-                    <li>Or press <strong>Ctrl+Shift+B</strong> to show install button</li>
+                    <li>Look for install icon in address bar</li>
+                    <li>Or check browser menu → "Install TRADE"</li>
+                    <li>Some browsers need multiple visits</li>
                   </ol>
                 </div>
               )}
-              
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded p-2">
-                <p className="text-xs text-yellow-800 dark:text-yellow-200">
-                  🔧 <strong>Supported Browsers:</strong> Chrome, Edge, Safari. Make sure you've visited the site a few times.
-                </p>
-              </div>
             </div>
             
             <div className="mt-4 flex justify-end space-x-2">
               <button
                 onClick={() => setShowManualInstructions(false)}
-                className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors duration-200"
+                className="px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
               >
                 Close
               </button>
-              {promptInstall && (
-                <button
-                  onClick={installApp}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors duration-200"
-                >
-                  Try Install Again
-                </button>
-              )}
+              <button
+                onClick={installApp}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+              >
+                Try Install
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Debug info - only in development */}
+      {/* Debug Panel */}
       {process.env.NODE_ENV === 'development' && (
-        <div className="fixed top-4 left-4 z-50 bg-black bg-opacity-80 text-white p-3 rounded text-xs max-w-xs">
+        <div className="fixed top-4 left-4 z-50 bg-black text-white p-3 rounded text-xs max-w-xs space-y-1">
           <div><strong>PWA Debug:</strong></div>
           <div>Status: {pwaStatus}</div>
-          <div>Has Prompt: {!!promptInstall ? 'Yes' : 'No'}</div>
-          <div>Installed: {isInstalled ? 'Yes' : 'No'}</div>
-          <div>Browser: {isChrome ? 'Chrome' : 'Other'}</div>
+          <div>Prompt: {promptInstall ? 'YES' : 'NO'}</div>
+          <div>Installed: {isInstalled ? 'YES' : 'NO'}</div>
+          <div>HTTPS: {debugInfo.isHTTPS ? 'YES' : 'NO'}</div>
+          <div>Manifest: {debugInfo.hasManifest ? 'YES' : 'NO'}</div>
+          <div>ServiceWorker: {debugInfo.hasServiceWorker ? 'YES' : 'NO'}</div>
+          <button 
+            onClick={() => {
+              // Force trigger for testing
+              const event = new Event('beforeinstallprompt');
+              event.prompt = () => Promise.resolve({ outcome: 'accepted' });
+              event.userChoice = Promise.resolve({ outcome: 'accepted' });
+              window.dispatchEvent(event);
+            }}
+            className="mt-1 bg-blue-500 px-2 py-1 rounded text-xs"
+          >
+            Simulate Prompt
+          </button>
         </div>
       )}
     </>

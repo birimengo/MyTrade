@@ -120,7 +120,9 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'https://my-trade.vercel.app', // Your Vercel frontend
   'https://mytrade-cx5z.onrender.com', // Your Render backend (for API calls between services)
+  'https://mytradeug.netlify.app',
   'https://mytradeuganda.netlify.app' // ADDED: Your Netlify frontend domain
+
 ];
 
 const io = socketIo(server, {
@@ -263,7 +265,7 @@ app.get('/api/health', async (req, res) => {
       cors: {
         enabled: true,
         allowedOrigins: allowedOrigins,
-        netlifyFrontend: 'https://mytradeuganda.netlify.app'
+        netlifyFrontend: 'https://mytradeug.netlify.app'
       },
       routes: [
         '/api/auth',

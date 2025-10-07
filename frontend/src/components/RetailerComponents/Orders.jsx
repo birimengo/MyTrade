@@ -760,8 +760,8 @@ const Orders = () => {
   });
 
   // Responsive height calculations
-  const containerHeight = isMobile ? 'h-[650px]' : 'h-[450px]';
-  const ordersContainerHeight = isMobile ? 'h-[500px]' : 'h-[320px]';
+  const containerHeight = isMobile ? 'h-[650px]' : 'h-[500px]';
+  const ordersContainerHeight = isMobile ? 'h-[550px]' : 'h-[500px]';
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg shadow p-3 mt-2 ${containerHeight}`}>

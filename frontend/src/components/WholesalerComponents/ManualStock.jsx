@@ -1,7 +1,7 @@
 import React, { Component } from 'react';
 import axios from 'axios';
 import { FaBox, FaSearch, FaFilter, FaEdit, FaTrash, FaExclamationTriangle, FaChartBar, FaCube, FaExclamationCircle, FaRedo, FaBell, FaTag, FaWarehouse, FaShoppingCart } from 'react-icons/fa';
-
+import { API_BASE_URL } from "../../config/api.jsx";
 class ManualStock extends Component {
   constructor(props) {
     super(props);
@@ -44,7 +44,7 @@ class ManualStock extends Component {
         search: searchTerm || undefined
       });
 
-      const response = await axios.get('http://localhost:5000/api/products', {
+      const response = await axios.get(`${API_BASE_URL}/api/products`, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -82,7 +82,7 @@ class ManualStock extends Component {
   fetchCategories = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/products/categories', {
+      const response = await axios.get(`${API_BASE_URL}/api/products/categories`, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -180,7 +180,7 @@ class ManualStock extends Component {
         // Fallback: direct API call
         try {
           const token = localStorage.getItem('token');
-          await axios.delete(`http://localhost:5000/api/products/${product._id}`, {
+          await axios.delete(`${API_BASE_URL}/api/products/${product._id}`, {
             headers: { 
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json'

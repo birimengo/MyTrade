@@ -232,7 +232,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-800 h-[600px]">
+    <div className="flex flex-col bg-white dark:bg-gray-800 h-[600px]">
       {/* Header */}
       <div className="p-2 border-b border-gray-200 dark:border-gray-700 flex items-center">
         {isEmbedded && (

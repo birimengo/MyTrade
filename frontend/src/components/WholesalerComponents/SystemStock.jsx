@@ -7,7 +7,7 @@ import {
   FaTruck, FaUser, FaMapMarkerAlt, FaShoppingCart, FaImage,
   FaChevronLeft, FaChevronRight
 } from 'react-icons/fa';
-
+import { API_BASE_URL } from "../../config/api.jsx";
 class SystemStock extends Component {
   constructor(props) {
     super(props);
@@ -52,7 +52,7 @@ class SystemStock extends Component {
       const { searchTerm, categoryFilter, currentPage, itemsPerPage } = this.state;
       
       // Fetch orders with certified status
-      const response = await axios.get('http://localhost:5000/api/wholesaler-orders', {
+      const response = await axios.get(`${API_BASE_URL}/api/wholesaler-orders`, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -169,7 +169,7 @@ class SystemStock extends Component {
         // Strategy 2: Try supplier products endpoint
         const token = localStorage.getItem('token');
         try {
-          const response = await axios.get(`http://localhost:5000/api/supplier/products/${productId}`, {
+          const response = await axios.get(`${API_BASE_URL}/api/supplier/products/${productId}`, {
             headers: { 
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json'
@@ -192,7 +192,7 @@ class SystemStock extends Component {
 
         // Strategy 3: Try general products endpoint
         try {
-          const response = await axios.get(`http://localhost:5000/api/products/${productId}`, {
+          const response = await axios.get(`${API_BASE_URL}/api/products/${productId}`, {
             headers: { 
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json'
@@ -412,7 +412,7 @@ class SystemStock extends Component {
       this.setState({ syncing: true });
       const token = localStorage.getItem('token');
       
-      const response = await axios.post('http://localhost:5000/api/system-stocks/sync', {}, {
+      const response = await axios.post(`${API_BASE_URL}/api/system-stocks/sync`, {}, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'

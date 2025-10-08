@@ -32,6 +32,9 @@ import {
   FaExclamationCircle
 } from 'react-icons/fa';
 
+// Use environment variable or fallback to localhost
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
 const Production = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +126,7 @@ const Production = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/supplier-products', {
+      const response = await axios.get(`${API_BASE_URL}/api/supplier-products`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -146,7 +149,7 @@ const Production = () => {
   const fetchCategories = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/supplier-products/categories', {
+      const response = await axios.get(`${API_BASE_URL}/api/supplier-products/categories`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -161,7 +164,7 @@ const Production = () => {
   const fetchStatistics = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/supplier-products/stats', {
+      const response = await axios.get(`${API_BASE_URL}/api/supplier-products/stats`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -270,14 +273,14 @@ const Production = () => {
 
       let response;
       if (editingProduct) {
-        response = await axios.put(`http://localhost:5000/api/supplier-products/${editingProduct._id}`, formDataToSend, {
+        response = await axios.put(`${API_BASE_URL}/api/supplier-products/${editingProduct._id}`, formDataToSend, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'multipart/form-data'
           }
         });
       } else {
-        response = await axios.post('http://localhost:5000/api/supplier-products', formDataToSend, {
+        response = await axios.post(`${API_BASE_URL}/api/supplier-products`, formDataToSend, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'multipart/form-data'
@@ -302,7 +305,7 @@ const Production = () => {
     if (window.confirm('Are you sure you want to delete this product?')) {
       try {
         const token = localStorage.getItem('token');
-        await axios.delete(`http://localhost:5000/api/supplier-products/${productId}`, {
+        await axios.delete(`${API_BASE_URL}/api/supplier-products/${productId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         fetchProducts();
@@ -317,7 +320,7 @@ const Production = () => {
   const handleStatusUpdate = async (productId, status) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.put(`http://localhost:5000/api/supplier-products/${productId}/status`, 
+      await axios.put(`${API_BASE_URL}/api/supplier-products/${productId}/status`, 
         { status },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -429,14 +432,13 @@ const Production = () => {
       )}
 
       {/* Statistics Cards - Made smaller and sticky */}
-     <div
-  className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-1 transition-all duration-300 ${
-    isSticky
-      ? 'sticky top-0 z-40 pt-1 pb-2 bg-gray-100 dark:bg-gray-900 shadow-md'
-      : ''
-  }`}
->
-
+      <div
+        className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-1 transition-all duration-300 ${
+          isSticky
+            ? 'sticky top-0 z-40 pt-1 pb-2 bg-gray-100 dark:bg-gray-900 shadow-md'
+            : ''
+        }`}
+      >
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800 rounded-lg shadow p-3 border border-blue-200 dark:border-blue-700">
           <div className="flex items-center justify-between">
             <div>

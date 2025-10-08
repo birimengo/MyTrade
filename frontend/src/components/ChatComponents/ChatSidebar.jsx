@@ -1,3 +1,4 @@
+// ChatSidebar.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { FaSearch, FaComments, FaFilter, FaTimes, FaUser } from 'react-icons/fa';
@@ -9,7 +10,7 @@ const ChatSidebar = ({
   socket,
   autoOpen = false,
   initialFilter = '',
-  specificUserId = ''
+  specificUserId = '' // New prop for specific user filtering
 }) => {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,16 +19,11 @@ const ChatSidebar = ({
   const [loading, setLoading] = useState(false);
   const [roleFilter, setRoleFilter] = useState('');
   const [specificUserFilter, setSpecificUserFilter] = useState('');
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    window.addEventListener('resize', handleResize);
     fetchCommunicableUsers();
     
+    // Listen for online users updates
     if (socket) {
       socket.on('onlineUsers', (onlineUserIds) => {
         setOnlineUsers(onlineUserIds);
@@ -38,10 +34,10 @@ const ChatSidebar = ({
       if (socket) {
         socket.off('onlineUsers');
       }
-      window.removeEventListener('resize', handleResize);
     };
   }, [socket]);
 
+  // Apply initial filters when autoOpen is triggered
   useEffect(() => {
     if (autoOpen) {
       if (initialFilter) {
@@ -66,6 +62,7 @@ const ChatSidebar = ({
       }
     } catch (error) {
       console.error('Error fetching users:', error);
+      // Fallback mock data for testing
       setUsers([
         {
           _id: '1',
@@ -103,17 +100,20 @@ const ChatSidebar = ({
     }
   };
 
+  // Clear all filters
   const clearFilters = () => {
     setRoleFilter('');
     setSpecificUserFilter('');
     setSearchTerm('');
   };
 
+  // Clear specific user filter but keep role filter
   const clearSpecificUserFilter = () => {
     setSpecificUserFilter('');
   };
 
   const filteredUsers = users.filter(user => {
+    // Search filter
     const matchesSearch = 
       user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -121,6 +121,7 @@ const ChatSidebar = ({
       user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (user.contactPerson && user.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()));
     
+    // Role filter
     const matchesRole = roleFilter ? 
       (user.role === roleFilter || 
        user.userType === roleFilter || 
@@ -128,12 +129,14 @@ const ChatSidebar = ({
        (user.businessType && user.businessType.toLowerCase().includes(roleFilter.toLowerCase()))) 
       : true;
     
+    // Specific user filter
     const matchesSpecificUser = specificUserFilter ? 
       user._id === specificUserFilter : true;
     
     return matchesSearch && matchesRole && matchesSpecificUser;
   });
 
+  // Get display name for filter badge
   const getFilterDisplayName = () => {
     if (specificUserFilter) {
       const specificUser = users.find(u => u._id === specificUserFilter);
@@ -154,10 +157,12 @@ const ChatSidebar = ({
     return '';
   };
 
+  // Get filtered online users count
   const getFilteredOnlineCount = () => {
     return filteredUsers.filter(user => onlineUsers.includes(user._id)).length;
   };
 
+  // Get specific user info for the filter badge
   const getSpecificUserInfo = () => {
     if (!specificUserFilter) return null;
     return users.find(u => u._id === specificUserFilter);
@@ -165,17 +170,15 @@ const ChatSidebar = ({
 
   const specificUser = getSpecificUserInfo();
 
-  // Mobile-responsive heights
-  const sidebarHeight = isMobile ? 'min-h-[80vh] h-[80vh]' : 'h-[600px]';
-  const userListHeight = isMobile ? 'h-[calc(80vh-80px)]' : 'h-[calc(100%-60px)]';
-
   return (
-    <div className={`flex flex-col ${isEmbedded ? '' : 'bg-white dark:bg-gray-800 rounded-lg shadow'} ${sidebarHeight}`}>
+    <div className={`flex flex-col h-full ${isEmbedded ? '' : 'bg-white dark:bg-gray-800'}`}>
+      {/* Search and Filters */}
       {isEmbedded && (
-        <div className="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
+        <div className="p-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
+          {/* Search Bar - Only show if not filtering by specific user */}
           {!specificUserFilter && (
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
                 <FaSearch className="text-gray-400 text-sm" />
               </div>
               <input
@@ -183,22 +186,24 @@ const ChatSidebar = ({
                 placeholder="Search users..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 w-full p-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="pl-8 w-full p-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           )}
           
+          {/* Filter Badges */}
           {(roleFilter || specificUserFilter) && (
             <div className="space-y-2">
+              {/* Specific User Filter Badge */}
               {specificUserFilter && specificUser && (
-                <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
-                  <span className="text-sm text-green-700 dark:text-green-300 flex items-center">
-                    <FaUser className="mr-2" />
+                <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded">
+                  <span className="text-xs text-green-700 dark:text-green-300 flex items-center">
+                    <FaUser className="mr-1" />
                     Chat with: {specificUser.businessName || `${specificUser.firstName} ${specificUser.lastName}`}
                   </span>
                   <button 
                     onClick={clearSpecificUserFilter}
-                    className="text-sm text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 flex items-center"
+                    className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 flex items-center"
                   >
                     <FaTimes className="mr-1" />
                     Show All
@@ -206,15 +211,16 @@ const ChatSidebar = ({
                 </div>
               )}
               
+              {/* Role Filter Badge */}
               {roleFilter && !specificUserFilter && (
-                <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 px-3 py-2 rounded-lg">
-                  <span className="text-sm text-blue-700 dark:text-blue-300 flex items-center">
-                    <FaFilter className="mr-2" />
+                <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
+                  <span className="text-xs text-blue-700 dark:text-blue-300 flex items-center">
+                    <FaFilter className="mr-1" />
                     Showing: {getFilterDisplayName()}
                   </span>
                   <button 
                     onClick={clearFilters}
-                    className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 flex items-center"
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 flex items-center"
                   >
                     <FaTimes className="mr-1" />
                     Clear
@@ -226,14 +232,15 @@ const ChatSidebar = ({
         </div>
       )}
 
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-        <div className="flex justify-between items-center">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {specificUserFilter ? 'Direct Chat' : 'Online Users'}
+      {/* Online Users Count */}
+      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex justify-between items-center text-xs">
+          <span className="text-gray-500 dark:text-gray-400">
+            {specificUserFilter ? 'Chat' : 'Online Users'}
           </span>
-          <span className="text-green-600 dark:text-green-400 font-semibold text-sm">
+          <span className="text-green-500 font-medium">
             {specificUserFilter && specificUser ? (
-              onlineUsers.includes(specificUser._id) ? '🟢 Online' : '⚫ Offline'
+              onlineUsers.includes(specificUser._id) ? 'Online' : 'Offline'
             ) : (
               `${getFilteredOnlineCount()} of ${filteredUsers.length} online`
             )}
@@ -241,32 +248,28 @@ const ChatSidebar = ({
         </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto ${userListHeight}`}>
+      {/* User List */}
+      <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="flex justify-center items-center h-full">
-            <div className="flex flex-col items-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Loading users...</p>
-            </div>
+          <div className="flex justify-center items-center h-24">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
           </div>
         ) : filteredUsers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <FaComments className="text-3xl text-gray-400 dark:text-gray-500 mb-3" />
-            <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">No users available to chat with</p>
+          <div className="text-center py-6 text-gray-500 dark:text-gray-400">
+            <FaComments className="mx-auto text-xl mb-1" />
+            <p className="text-xs">No users available to chat with</p>
             {roleFilter && !specificUserFilter && (
-              <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-                No {getFilterDisplayName().toLowerCase()} found
-              </p>
+              <p className="text-xs mt-1">No {getFilterDisplayName().toLowerCase()} found</p>
             )}
             {specificUserFilter && (
-              <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">User not found</p>
+              <p className="text-xs mt-1">User not found</p>
             )}
             {!roleFilter && !specificUserFilter && (
               <button 
                 onClick={fetchCommunicableUsers}
-                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                className="text-xs text-blue-500 hover:text-blue-700 mt-2"
               >
-                Retry Loading
+                Retry
               </button>
             )}
           </div>
@@ -276,23 +279,16 @@ const ChatSidebar = ({
             onSelectUser={onSelectConversation}
             onlineUsers={onlineUsers}
             highlightUser={specificUserFilter}
-            isMobile={isMobile}
           />
         )}
       </div>
 
+      {/* Debug Info - Remove in production */}
       {process.env.NODE_ENV === 'development' && (
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 bg-gray-50 dark:bg-gray-700/30">
-          <div className="grid grid-cols-2 gap-1">
-            <span>Total Users:</span>
-            <span className="text-right">{users.length}</span>
-            <span>Filtered:</span>
-            <span className="text-right">{filteredUsers.length}</span>
-            <span>Role Filter:</span>
-            <span className="text-right">{roleFilter || 'None'}</span>
-            <span>Specific User:</span>
-            <span className="text-right">{specificUserFilter || 'None'}</span>
-          </div>
+        <div className="p-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500">
+          <div>Debug: Total Users: {users.length} | Filtered: {filteredUsers.length}</div>
+          <div>Role Filter: {roleFilter || 'None'} | Specific User: {specificUserFilter || 'None'}</div>
+          <div>Search: {searchTerm || 'None'}</div>
         </div>
       )}
     </div>

@@ -16,6 +16,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
     if (message.trim()) {
       onSendMessage(message);
       setMessage('');
+      // Notify that typing has stopped
       if (onTyping) onTyping(false);
     }
   };
@@ -24,15 +25,19 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
     const value = e.target.value;
     setMessage(value);
     
+    // Handle typing indicators
     if (onTyping) {
+      // Clear previous timeout
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
+      // Notify typing started
       if (value.trim() && !typingTimeoutRef.current) {
         onTyping(true);
       }
       
+      // Set timeout to notify typing stopped
       typingTimeoutRef.current = setTimeout(() => {
         onTyping(false);
         typingTimeoutRef.current = null;
@@ -43,11 +48,13 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Check file size (max 15MB)
       if (file.size > 15 * 1024 * 1024) {
         alert('File size must be less than 15MB');
         return;
       }
       
+      // Check file type
       const allowedTypes = [
         'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
         'application/pdf', 
@@ -68,6 +75,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
         return;
       }
       
+      // Handle audio files separately
       if (file.type.startsWith('audio/')) {
         if (onVoiceMessage) {
           onVoiceMessage(file);
@@ -109,6 +117,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
 
   const handleVoiceRecordingComplete = (audioBlob) => {
     if (onVoiceMessage) {
+      // Convert blob to file
       const audioFile = new File([audioBlob], 'voice-message.webm', {
         type: 'audio/webm'
       });
@@ -139,6 +148,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // NEW: Responsive sizes
   const padding = isMobile ? 'p-1' : 'p-2';
   const buttonSize = isMobile ? 'p-1.5' : 'p-2';
   const iconSize = isMobile ? 'text-xs' : 'text-sm';
@@ -146,6 +156,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
 
   return (
     <div className="border-t border-gray-200 dark:border-gray-700">
+      {/* Voice Recorder */}
       {showVoiceRecorder && (
         <VoiceRecorder 
           onRecordingComplete={handleVoiceRecordingComplete}
@@ -154,6 +165,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
         />
       )}
 
+      {/* File Uploader */}
       {showFileUploader && selectedFile && (
         <div className={`${padding} border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700`}>
           <div className="flex items-center space-x-3">
@@ -186,8 +198,10 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
         </div>
       )}
 
+      {/* Message Input */}
       <form onSubmit={handleSubmit} className={padding}>
         <div className={`flex ${isMobile ? 'space-x-1' : 'space-x-2'}`}>
+          {/* Voice Message Button */}
           <button
             type="button"
             onClick={toggleVoiceRecorder}
@@ -200,6 +214,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
             <FaMicrophone className={iconSize} />
           </button>
 
+          {/* File Attachment Button */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -208,6 +223,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
             <FaPaperclip className={iconSize} />
           </button>
           
+          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -216,6 +232,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
             accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.webm,.mp3,.wav"
           />
 
+          {/* Message Input */}
           <input
             type="text"
             value={message}
@@ -225,6 +242,7 @@ const MessageInput = ({ onSendMessage, onTyping, onRecording, onFileUpload, onVo
             disabled={showVoiceRecorder}
           />
 
+          {/* Send Button */}
           <button
             type="submit"
             disabled={!message.trim() || showVoiceRecorder}

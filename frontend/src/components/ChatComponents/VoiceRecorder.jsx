@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaMicrophone, FaStop, FaPlay, FaPause, FaTrash, FaPaperPlane } from 'react-icons/fa';
 
-const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, isMobile = false }) => {
+const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedAudio, setRecordedAudio] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -36,6 +36,7 @@ const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, 
         } 
       });
       
+      // Setup audio context for visualization
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       const source = audioContextRef.current.createMediaStreamSource(stream);
@@ -63,19 +64,22 @@ const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, 
         setRecordedAudio({ blob: audioBlob, url: audioUrl });
         clearInterval(recordingTimerRef.current);
         
+        // Clean up audio context
         if (audioContextRef.current) {
           audioContextRef.current.close();
           audioContextRef.current = null;
         }
       };
 
-      mediaRecorderRef.current.start(100);
+      mediaRecorderRef.current.start(100); // Collect data every 100ms
       setIsRecording(true);
       
+      // Start recording timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
 
+      // Start visualization
       visualizeAudio();
 
     } catch (error) {
@@ -106,6 +110,9 @@ const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, 
     const draw = () => {
       animationRef.current = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(dataArray);
+      
+      // You can use this data for visualization if needed
+      // For now, we're just keeping the function running
     };
 
     draw();
@@ -148,9 +155,6 @@ const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, 
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const buttonSize = isMobile ? 'p-2' : 'p-3';
-  const iconSize = isMobile ? 'text-xs' : 'text-sm';
-
   return (
     <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
       <audio ref={audioRef} src={recordedAudio?.url} onEnded={() => setIsPlaying(false)} />
@@ -160,7 +164,7 @@ const VoiceRecorder = ({ onRecordingComplete, onCancel, onRecordingStateChange, 
           <div className="flex items-center space-x-3 flex-1">
             <button
               onClick={isRecording ? stopRecording : startRecording}
-              className={`${buttonSize} rounded-full transition-all duration-200 ${
+              className={`p-3 rounded-full transition-all duration-200 ${
                 isRecording 
                   ? 'bg-red-500 text-white animate-pulse' 
                   : 'bg-blue-600 text-white hover:bg-blue-700'

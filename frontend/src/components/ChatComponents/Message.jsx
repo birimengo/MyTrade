@@ -16,7 +16,7 @@ import {
   FaVolumeOff
 } from 'react-icons/fa';
 
-const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMobile = false }) => {
+const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback }) => {
   const [imageError, setImageError] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
@@ -30,6 +30,7 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
   const volumeControlRef = useRef(null);
 
   useEffect(() => {
+    // Clean up on unmount
     return () => {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
@@ -38,6 +39,7 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
   }, []);
 
   useEffect(() => {
+    // Handle click outside volume control
     const handleClickOutside = (event) => {
       if (volumeControlRef.current && !volumeControlRef.current.contains(event.target)) {
         setShowVolumeControl(false);
@@ -118,9 +120,11 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
         setAudioPlaying(false);
         if (onAudioPlayback) onAudioPlayback(false);
       } else {
+        // Load audio metadata if not loaded
         if (audioRef.current.readyState === 0) {
           await audioRef.current.load();
         }
+        // Set volume before playing
         audioRef.current.volume = isMuted ? 0 : audioVolume;
         const playPromise = audioRef.current.play();
         
@@ -178,6 +182,7 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
       audioRef.current.volume = newVolume;
     }
     
+    // Unmute if volume is increased from 0
     if (newVolume > 0 && isMuted) {
       setIsMuted(false);
     }
@@ -235,35 +240,32 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
     setShowVolumeControl(!showVolumeControl);
   };
 
+  // Check if message has file content
   const hasFile = message.type !== 'text' && message.fileUrl;
-
-  const messageMaxWidth = isMobile ? 'max-w-[85%]' : 'max-w-xs';
-  const textSize = isMobile ? 'text-xs' : 'text-sm';
-  const timestampSize = isMobile ? 'text-[10px]' : 'text-xs';
-  const audioButtonSize = isMobile ? 'p-1.5' : 'p-2';
-  const audioIconSize = isMobile ? 'text-[10px]' : 'text-xs';
-  const imageMaxHeight = isMobile ? 'max-h-32' : 'max-h-48';
 
   return (
     <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-2`}>
       <div
-        className={`${messageMaxWidth} px-3 py-1.5 rounded-lg ${
+        className={`max-w-xs px-3 py-1.5 rounded-lg ${
           isOwn
             ? 'bg-blue-600 text-white'
             : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
         }`}
       >
+        {/* Text Message */}
         {message.type === 'text' && (
           <>
-            <p className={textSize}>{message.content}</p>
-            <p className={`${timestampSize} mt-0.5 ${isOwn ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
+            <p className="text-sm">{message.content}</p>
+            <p className={`text-xs mt-0.5 ${isOwn ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
               {formatTime(message.createdAt)}
             </p>
           </>
         )}
 
+        {/* File Message (Image, Document, Audio) */}
         {hasFile && (
           <div className="space-y-1">
+            {/* Image Message */}
             {message.type === 'image' && !imageError && (
               <>
                 <div 
@@ -273,14 +275,14 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
                   <img
                     src={message.fileUrl}
                     alt={message.fileName || 'Shared image'}
-                    className={`rounded-lg max-w-full h-auto ${imageMaxHeight} object-cover`}
+                    className="rounded-lg max-w-full h-auto max-h-48 object-cover"
                     onError={handleImageError}
                     loading="lazy"
                   />
                 </div>
                 {message.fileName && (
                   <div className="flex items-center justify-between">
-                    <span className={`${timestampSize} text-gray-500 dark:text-gray-400 truncate`}>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                       {message.fileName}
                     </span>
                     <button
@@ -288,21 +290,22 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
                       className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                       title="Download"
                     >
-                      <FaDownload className={audioIconSize} />
+                      <FaDownload className="text-xs" />
                     </button>
                   </div>
                 )}
               </>
             )}
 
+            {/* Document Message */}
             {message.type === 'document' && (
               <div className="flex items-center space-x-2">
-                <div className={`${isMobile ? 'p-1.5' : 'p-2'} bg-gray-100 dark:bg-gray-600 rounded-lg`}>
+                <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
                   {getFileIcon(message.fileType, message.fileName)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className={`${textSize} font-medium truncate`}>{message.fileName || 'Document'}</p>
-                  <p className={timestampSize}>
+                  <p className="text-sm font-medium truncate">{message.fileName || 'Document'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
                     {formatFileSize(message.fileSize)}
                   </p>
                 </div>
@@ -311,34 +314,37 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
                   className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                   title="Download"
                 >
-                  <FaDownload className={audioIconSize} />
+                  <FaDownload className="text-xs" />
                 </button>
               </div>
             )}
 
+            {/* Audio Message */}
             {message.type === 'audio' && (
               <div className="flex items-center space-x-2">
-                <div className={`${isMobile ? 'p-1.5' : 'p-2'} bg-gray-100 dark:bg-gray-600 rounded-lg`}>
+                <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
                   <FaMusic className="text-purple-500" />
                 </div>
                 
                 <div className="flex-1 min-w-0">
-                  <p className={`${textSize} font-medium truncate`}>Voice message</p>
+                  <p className="text-sm font-medium truncate">Voice message</p>
                   
-                  <div className={`flex items-center ${isMobile ? 'space-x-1' : 'space-x-2'} mt-1`}>
+                  <div className="flex items-center space-x-2 mt-1">
+                    {/* Play/Pause Button */}
                     <button
                       onClick={toggleAudioPlayback}
-                      className={`${audioButtonSize} rounded-full flex-shrink-0 ${
+                      className={`p-2 rounded-full flex-shrink-0 ${
                         isOwn ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gray-300 dark:bg-gray-500 text-gray-700 dark:text-white hover:bg-gray-400 dark:hover:bg-gray-400'
                       } transition-colors duration-200`}
                     >
                       {audioPlaying ? (
-                        <FaPause className={audioIconSize} />
+                        <FaPause className="text-xs" />
                       ) : (
-                        <FaPlay className={audioIconSize} style={{ transform: 'translateX(1px)' }} />
+                        <FaPlay className="text-xs" style={{ transform: 'translateX(1px)' }} />
                       )}
                     </button>
                     
+                    {/* Progress Bar and Time */}
                     <div className="flex-1 space-y-1 min-w-0">
                       <div 
                         className="w-full bg-gray-300 dark:bg-gray-500 h-2 rounded-full overflow-hidden cursor-pointer"
@@ -352,57 +358,58 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
                         ></div>
                       </div>
                       
-                      <div className={`flex justify-between items-center ${timestampSize} text-gray-500 dark:text-gray-400`}>
+                      <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
                         <span>{formatAudioTime(audioRef.current?.currentTime || 0)}</span>
                         <span>{formatAudioTime(audioDuration)}</span>
                       </div>
                     </div>
 
-                    {!isMobile && (
-                      <div className="relative" ref={volumeControlRef}>
-                        <button
-                          onClick={toggleVolumeControl}
-                          className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                          title="Volume control"
-                        >
-                          {getVolumeIcon()}
-                        </button>
-                        
-                        {showVolumeControl && (
-                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 z-10">
-                            <input
-                              type="range"
-                              min="0"
-                              max="1"
-                              step="0.1"
-                              value={isMuted ? 0 : audioVolume}
-                              onChange={handleVolumeChange}
-                              className="w-16 h-1 bg-gray-300 dark:bg-gray-500 rounded-lg appearance-none cursor-pointer"
-                              orient="vertical"
-                              style={{
-                                writingMode: 'bt-lr',
-                                WebkitAppearance: 'slider-vertical'
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {/* Volume Control */}
+                    <div className="relative" ref={volumeControlRef}>
+                      <button
+                        onClick={toggleVolumeControl}
+                        className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                        title="Volume control"
+                      >
+                        {getVolumeIcon()}
+                      </button>
+                      
+                      {showVolumeControl && (
+                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 p-2 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 z-10">
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.1"
+                            value={isMuted ? 0 : audioVolume}
+                            onChange={handleVolumeChange}
+                            className="w-16 h-1 bg-gray-300 dark:bg-gray-500 rounded-lg appearance-none cursor-pointer"
+                            orient="vertical"
+                            style={{
+                              writingMode: 'bt-lr',
+                              WebkitAppearance: 'slider-vertical'
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
 
+                    {/* Mute Toggle */}
                     <button
                       onClick={toggleMute}
                       className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                       title={isMuted ? "Unmute" : "Mute"}
                     >
-                      {isMuted ? <FaVolumeMute className={audioIconSize} /> : <FaVolumeUp className={audioIconSize} />}
+                      {isMuted ? <FaVolumeMute className="text-xs" /> : <FaVolumeUp className="text-xs" />}
                     </button>
 
+                    {/* Download Button */}
                     <button
                       onClick={() => handleDownload(message.fileUrl, message.fileName || 'voice-message.webm')}
                       className="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 flex-shrink-0"
                       title="Download"
                     >
-                      <FaDownload className={audioIconSize} />
+                      <FaDownload className="text-xs" />
                     </button>
                   </div>
                 </div>
@@ -420,32 +427,34 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
               </div>
             )}
 
+            {/* Timestamp for non-audio file types */}
             {message.type !== 'audio' && (
-              <p className={`${timestampSize} ${isOwn ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
+              <p className={`text-xs ${isOwn ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
                 {formatTime(message.createdAt)}
               </p>
             )}
           </div>
         )}
 
+        {/* Image Modal */}
         {showImageModal && (
           <div 
             className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
             onClick={closeImageModal}
           >
             <div 
-              className="bg-white dark:bg-gray-800 rounded-lg p-4 max-w-4xl max-h-full mx-2"
+              className="bg-white dark:bg-gray-800 rounded-lg p-4 max-w-4xl max-h-full"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-between items-center mb-4">
-                <h3 className={`font-semibold text-gray-900 dark:text-white ${isMobile ? 'text-sm' : 'text-lg'}`}>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   {message.fileName || 'Image'}
                 </h3>
                 <button
                   onClick={closeImageModal}
                   className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <FaTimes className={isMobile ? "text-base" : "text-lg"} />
+                  <FaTimes className="text-lg" />
                 </button>
               </div>
               <img
@@ -454,12 +463,12 @@ const Message = ({ message, isOwn, socket, conversationId, onAudioPlayback, isMo
                 className="max-w-full max-h-96 object-contain"
               />
               <div className="mt-4 flex justify-between items-center">
-                <span className={`text-gray-500 dark:text-gray-400 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                <span className="text-sm text-gray-500 dark:text-gray-400">
                   {formatFileSize(message.fileSize)}
                 </span>
                 <button
                   onClick={() => handleDownload(message.fileUrl, message.fileName || 'image')}
-                  className={`bg-blue-600 text-white rounded-md hover:bg-blue-700 ${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'}`}
+                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
                 >
                   Download
                 </button>

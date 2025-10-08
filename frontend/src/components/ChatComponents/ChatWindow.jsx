@@ -4,9 +4,9 @@ import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import TypingIndicator from './TypingIndicator';
 import OnlineIndicator from './OnlineIndicator';
-import { FaTimes, FaUser, FaArrowLeft, FaSync, FaExclamationTriangle, FaPhone, FaVideo } from 'react-icons/fa';
+import { FaTimes, FaUser, FaArrowLeft, FaSync, FaExclamationTriangle } from 'react-icons/fa';
 
-const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggleMobile = null }) => {
+const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,25 +14,17 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
   const [typingUsers, setTypingUsers] = useState([]);
   const [recordingUsers, setRecordingUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const messagesEndRef = useRef(null);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
     if (conversation) {
       fetchMessages();
       
+      // Join the conversation room
       if (socket) {
         socket.emit('join', conversation._id);
         
+        // Listen for new messages
         socket.on('message', (message) => {
           console.log('New message received:', message);
           if (message.conversationId === conversation._id) {
@@ -40,6 +32,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
+        // Listen for typing indicators
         socket.on('typing', (data) => {
           if (data.conversationId === conversation._id) {
             if (data.isTyping) {
@@ -50,6 +43,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
+        // Listen for recording indicators
         socket.on('recording', (data) => {
           if (data.conversationId === conversation._id) {
             if (data.isRecording) {
@@ -60,16 +54,19 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
+        // Listen for online users updates
         socket.on('onlineUsers', (onlineUserIds) => {
           setOnlineUsers(onlineUserIds || []);
         });
 
+        // Listen for file upload progress
         socket.on('fileUploadProgress', (data) => {
           if (data.conversationId === conversation._id) {
             console.log(`File upload progress: ${data.progress}%`);
           }
         });
 
+        // Listen for audio playback events
         socket.on('audioPlayback', (data) => {
           if (data.conversationId === conversation._id) {
             console.log(`User ${data.userId} is ${data.isPlaying ? 'playing' : 'paused'} audio message ${data.messageId}`);
@@ -223,137 +220,93 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
 
   const participant = getParticipant();
 
-  // Mobile-responsive dimensions
-  const chatHeight = isMobile ? 'min-h-[80vh] h-[80vh]' : 'h-[600px]';
-  const messagesHeight = isMobile ? 'h-[calc(80vh-140px)]' : 'h-[calc(100%-120px)]';
-  const headerPadding = isMobile ? 'p-3' : 'p-4';
-  const messagePadding = isMobile ? 'p-3' : 'p-4';
-
   if (!conversation) {
     return (
-      <div className={`flex flex-col bg-white dark:bg-gray-800 rounded-lg shadow items-center justify-center ${chatHeight}`}>
-        <div className="text-center p-8">
-          <div className="bg-blue-100 dark:bg-blue-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-            <FaExclamationTriangle className="text-2xl text-blue-500" />
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Conversation Selected</h3>
-          <p className="text-gray-600 dark:text-gray-300 text-sm">Select a user from the sidebar to start chatting</p>
+      <div className="flex flex-col h-full bg-white dark:bg-gray-800 items-center justify-center">
+        <div className="text-center p-6">
+          <FaExclamationTriangle className="mx-auto text-2xl text-yellow-500 mb-4" />
+          <p className="text-gray-600 dark:text-gray-300">No conversation selected</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-col bg-white dark:bg-gray-800 rounded-lg shadow ${chatHeight}`}>
+    <div className="flex flex-col h-full bg-white dark:bg-gray-800 h-[600px]">
       {/* Header */}
-      <div className={`${headerPadding} border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800 rounded-t-lg`}>
-        <div className="flex items-center space-x-3 flex-1 min-w-0">
-          {(isEmbedded || isMobile) && (
-            <button
-              onClick={onToggleMobile || onClose}
-              className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <FaArrowLeft className="text-base" />
-            </button>
-          )}
-          
+      <div className="p-2 border-b border-gray-200 dark:border-gray-700 flex items-center">
+        {isEmbedded && (
+          <button
+            onClick={onClose}
+            className="lg:hidden mr-2 p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+          >
+            <FaArrowLeft className="text-sm" />
+          </button>
+        )}
+        <div className="flex items-center space-x-2 flex-1">
           <div className="relative">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-              {participant?.businessName?.charAt(0) || participant?.firstName?.charAt(0) || 'U'}
+            <div className="w-8 h-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
+              <FaUser className="text-xs" />
             </div>
             <OnlineIndicator 
               isOnline={isParticipantOnline()} 
-              className="-top-1 -right-1"
-              size="sm"
+              className="-top-0.5 -right-0.5"
             />
           </div>
-          
           <div className="flex-1 min-w-0">
-            <div className="flex items-center space-x-2">
-              <h3 className="font-semibold text-gray-900 dark:text-white truncate text-base">
-                {participant?.businessName || `${participant?.firstName} ${participant?.lastName}`}
-              </h3>
+            <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              {participant?.businessName || `${participant?.firstName} ${participant?.lastName}`}
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+              {participant?.role}
               {isParticipantOnline() && (
-                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                <span className="text-green-500 ml-1">• Online</span>
               )}
-            </div>
-            <div className="flex items-center space-x-2 text-sm">
-              <span className="text-gray-500 dark:text-gray-400 capitalize">
-                {participant?.role}
-              </span>
-              <span className="text-gray-300 dark:text-gray-600">•</span>
-              <span className={`font-medium ${isParticipantOnline() ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                {isParticipantOnline() ? 'Online' : 'Offline'}
-              </span>
-            </div>
+            </p>
           </div>
         </div>
         
-        <div className="flex items-center space-x-1">
-          {/* Call buttons - hidden on mobile to save space */}
-          {!isMobile && (
-            <>
-              <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                <FaPhone className="text-sm" />
-              </button>
-              <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                <FaVideo className="text-sm" />
-              </button>
-            </>
-          )}
-          
+        {/* Refresh Button */}
+        <button
+          onClick={handleRetry}
+          disabled={loading}
+          className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 disabled:opacity-50"
+          title="Refresh messages"
+        >
+          <FaSync className={`text-sm ${loading ? 'animate-spin' : ''}`} />
+        </button>
+        
+        {!isEmbedded && (
           <button
-            onClick={handleRetry}
-            disabled={loading}
-            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
-            title="Refresh messages"
+            onClick={onClose}
+            className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           >
-            <FaSync className={`text-sm ${loading ? 'animate-spin' : ''}`} />
+            <FaTimes className="text-sm" />
           </button>
-          
-          {!isEmbedded && !isMobile && (
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <FaTimes className="text-sm" />
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Messages Area */}
-      <div className={`flex-1 overflow-y-auto ${messagePadding} ${messagesHeight}`}>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-2">
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-3"></div>
-            <p className="text-gray-500 dark:text-gray-400 text-sm">Loading messages...</p>
+          <div className="flex justify-center items-center h-full">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="bg-red-100 dark:bg-red-900/30 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-              <FaExclamationTriangle className="text-xl text-red-500" />
-            </div>
-            <h4 className="text-red-600 dark:text-red-400 font-medium mb-2">Failed to load messages</h4>
-            <p className="text-red-500 dark:text-red-300 text-sm mb-4">{error}</p>
+            <FaExclamationTriangle className="text-2xl text-red-500 mb-2" />
+            <p className="text-red-600 dark:text-red-400 text-sm mb-4">{error}</p>
             <button
               onClick={handleRetry}
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
             >
-              Try Again
+              Retry
             </button>
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="bg-gray-100 dark:bg-gray-700 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaUser className="text-2xl text-gray-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No messages yet</h3>
-            <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
-              Start a conversation with {participant?.firstName || 'this user'}
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              Send a message to begin chatting
+          <div className="flex items-center justify-center h-full">
+            <p className="text-gray-500 dark:text-gray-400 text-sm">
+              No messages yet. Start a conversation!
             </p>
           </div>
         ) : (
@@ -363,28 +316,25 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
               currentUserId={user._id} 
               socket={socket}
               conversationId={conversation._id}
-              isMobile={isMobile}
             />
             <TypingIndicator 
               typingUsers={typingUsers}
               recordingUsers={recordingUsers}
               participants={conversation.participants}
               currentUserId={user._id}
-              isMobile={isMobile}
             />
           </>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Message Input */}
+      {/* Input */}
       <MessageInput 
         onSendMessage={handleSendMessage}
         onTyping={handleTyping}
         onRecording={handleRecording}
         onFileUpload={handleFileUpload}
         onVoiceMessage={handleVoiceMessage}
-        isMobile={isMobile}
       />
     </div>
   );

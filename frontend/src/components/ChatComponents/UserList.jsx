@@ -1,8 +1,7 @@
-// UserList.jsx
 import React, { useState, useEffect } from 'react';
 import { FaStore, FaIndustry, FaShippingFast, FaBoxes, FaUser, FaCircle, FaStar } from 'react-icons/fa';
 
-const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '' }) => {
+const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '', isMobile = false }) => {
   const [onlineUsersSet, setOnlineUsersSet] = useState(new Set(onlineUsers));
 
   useEffect(() => {
@@ -72,17 +71,20 @@ const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '' })
       : 'hover:bg-gray-50 dark:hover:bg-gray-700';
   };
 
+  const userItemPadding = isMobile ? 'p-2' : 'p-3';
+  const avatarSize = isMobile ? 'w-8 h-8' : 'w-10 h-10';
+  const textSize = isMobile ? 'text-xs' : 'text-sm';
+
   return (
     <div className="divide-y divide-gray-200 dark:divide-gray-700">
       {users.map(user => (
         <div
           key={user._id}
           onClick={() => onSelectUser(user)}
-          className={`p-3 flex items-center space-x-3 rounded-lg cursor-pointer transition-all duration-200 group ${getHighlightClass(user._id)}`}
+          className={`${userItemPadding} flex items-center space-x-3 rounded-lg cursor-pointer transition-all duration-200 group ${getHighlightClass(user._id)}`}
         >
-          {/* User Avatar with Online Status */}
           <div className="relative flex-shrink-0">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
+            <div className={`${avatarSize} rounded-full flex items-center justify-center text-white font-semibold ${isMobile ? 'text-xs' : 'text-sm'} ${
               isHighlighted(user._id) 
                 ? 'bg-gradient-to-r from-blue-600 to-purple-600' 
                 : 'bg-gradient-to-r from-blue-500 to-purple-500'
@@ -90,7 +92,7 @@ const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '' })
               {getUserInitials(user)}
             </div>
             <div className={`absolute -bottom-1 -right-1 ${getStatusColor(user._id)}`}>
-              <FaCircle className="text-xs bg-white dark:bg-gray-800 rounded-full" />
+              <FaCircle className={`${isMobile ? 'text-[8px]' : 'text-xs'} bg-white dark:bg-gray-800 rounded-full`} />
             </div>
             {isHighlighted(user._id) && (
               <div className="absolute -top-1 -left-1 text-yellow-500">
@@ -99,11 +101,10 @@ const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '' })
             )}
           </div>
 
-          {/* User Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <p className={`text-sm font-medium truncate ${
+                <p className={`${textSize} font-medium truncate ${
                   isHighlighted(user._id) 
                     ? 'text-blue-900 dark:text-blue-100' 
                     : 'text-gray-900 dark:text-white'
@@ -112,33 +113,33 @@ const UserList = ({ users, onSelectUser, onlineUsers = [], highlightUser = '' })
                 </p>
                 <div className="flex items-center space-x-1">
                   {getRoleIcon(user.role)}
-                  <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                  <span className={`${textSize} text-gray-500 dark:text-gray-400 capitalize`}>
                     {getRoleDisplayName(user.role)}
                   </span>
                 </div>
               </div>
               
-              {/* Online Status Text */}
               {isUserOnline(user._id) ? (
-                <span className="text-xs text-green-500 font-medium">Online</span>
+                <span className={`${textSize} text-green-500 font-medium`}>Online</span>
               ) : (
-                <span className="text-xs text-gray-400">
+                <span className={`${textSize} text-gray-400`}>
                   {formatLastSeen(user.lastSeen)}
                 </span>
               )}
             </div>
             
-            {/* Additional Info */}
-            <div className="flex items-center justify-between mt-1">
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {user.email}
-              </p>
-              {user.contactPerson && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 truncate ml-2">
-                  {user.contactPerson}
+            {!isMobile && (
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {user.email}
                 </p>
-              )}
-            </div>
+                {user.contactPerson && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 truncate ml-2">
+                    {user.contactPerson}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ))}

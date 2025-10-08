@@ -1,7 +1,7 @@
 import React from 'react';
 import Message from './Message';
 
-const MessageList = ({ messages, currentUserId, socket, conversationId }) => {
+const MessageList = ({ messages, currentUserId, socket, conversationId, isMobile = false }) => {
   const handleAudioPlayback = (isPlaying, messageId) => {
     if (socket && conversationId) {
       socket.emit('audioPlayback', {
@@ -12,10 +12,12 @@ const MessageList = ({ messages, currentUserId, socket, conversationId }) => {
     }
   };
 
+  const containerPadding = isMobile ? 'px-1 py-2' : 'px-3 py-4';
+
   return (
-    <div className="space-y-2 pt-1">
+    <div className={`space-y-2 ${containerPadding}`}>
       {messages.length === 0 ? (
-        <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
           No messages yet. Start a conversation!
         </div>
       ) : (
@@ -27,6 +29,7 @@ const MessageList = ({ messages, currentUserId, socket, conversationId }) => {
             socket={socket}
             conversationId={conversationId}
             onAudioPlayback={(isPlaying) => handleAudioPlayback(isPlaying, message._id)}
+            isMobile={isMobile}
           />
         ))
       )}

@@ -1,4 +1,3 @@
-// ChatSidebar.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { FaSearch, FaComments, FaFilter, FaTimes, FaUser } from 'react-icons/fa';
@@ -10,7 +9,7 @@ const ChatSidebar = ({
   socket,
   autoOpen = false,
   initialFilter = '',
-  specificUserId = '' // New prop for specific user filtering
+  specificUserId = ''
 }) => {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,11 +18,16 @@ const ChatSidebar = ({
   const [loading, setLoading] = useState(false);
   const [roleFilter, setRoleFilter] = useState('');
   const [specificUserFilter, setSpecificUserFilter] = useState('');
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', handleResize);
     fetchCommunicableUsers();
     
-    // Listen for online users updates
     if (socket) {
       socket.on('onlineUsers', (onlineUserIds) => {
         setOnlineUsers(onlineUserIds);
@@ -34,10 +38,10 @@ const ChatSidebar = ({
       if (socket) {
         socket.off('onlineUsers');
       }
+      window.removeEventListener('resize', handleResize);
     };
   }, [socket]);
 
-  // Apply initial filters when autoOpen is triggered
   useEffect(() => {
     if (autoOpen) {
       if (initialFilter) {
@@ -62,7 +66,6 @@ const ChatSidebar = ({
       }
     } catch (error) {
       console.error('Error fetching users:', error);
-      // Fallback mock data for testing
       setUsers([
         {
           _id: '1',
@@ -100,20 +103,17 @@ const ChatSidebar = ({
     }
   };
 
-  // Clear all filters
   const clearFilters = () => {
     setRoleFilter('');
     setSpecificUserFilter('');
     setSearchTerm('');
   };
 
-  // Clear specific user filter but keep role filter
   const clearSpecificUserFilter = () => {
     setSpecificUserFilter('');
   };
 
   const filteredUsers = users.filter(user => {
-    // Search filter
     const matchesSearch = 
       user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -121,7 +121,6 @@ const ChatSidebar = ({
       user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (user.contactPerson && user.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()));
     
-    // Role filter
     const matchesRole = roleFilter ? 
       (user.role === roleFilter || 
        user.userType === roleFilter || 
@@ -129,14 +128,12 @@ const ChatSidebar = ({
        (user.businessType && user.businessType.toLowerCase().includes(roleFilter.toLowerCase()))) 
       : true;
     
-    // Specific user filter
     const matchesSpecificUser = specificUserFilter ? 
       user._id === specificUserFilter : true;
     
     return matchesSearch && matchesRole && matchesSpecificUser;
   });
 
-  // Get display name for filter badge
   const getFilterDisplayName = () => {
     if (specificUserFilter) {
       const specificUser = users.find(u => u._id === specificUserFilter);
@@ -157,12 +154,10 @@ const ChatSidebar = ({
     return '';
   };
 
-  // Get filtered online users count
   const getFilteredOnlineCount = () => {
     return filteredUsers.filter(user => onlineUsers.includes(user._id)).length;
   };
 
-  // Get specific user info for the filter badge
   const getSpecificUserInfo = () => {
     if (!specificUserFilter) return null;
     return users.find(u => u._id === specificUserFilter);
@@ -170,12 +165,14 @@ const ChatSidebar = ({
 
   const specificUser = getSpecificUserInfo();
 
+  // Responsive height calculations
+  const sidebarHeight = isMobile ? 'h-[400px]' : 'h-[600px]';
+  const userListHeight = isMobile ? 'h-[320px]' : 'h-[500px]';
+
   return (
-    <div className={`flex flex-col h-full ${isEmbedded ? '' : 'bg-white dark:bg-gray-800'}`}>
-      {/* Search and Filters */}
+    <div className={`flex flex-col ${isEmbedded ? '' : 'bg-white dark:bg-gray-800'} ${sidebarHeight}`}>
       {isEmbedded && (
         <div className="p-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
-          {/* Search Bar - Only show if not filtering by specific user */}
           {!specificUserFilter && (
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
@@ -191,10 +188,8 @@ const ChatSidebar = ({
             </div>
           )}
           
-          {/* Filter Badges */}
           {(roleFilter || specificUserFilter) && (
             <div className="space-y-2">
-              {/* Specific User Filter Badge */}
               {specificUserFilter && specificUser && (
                 <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded">
                   <span className="text-xs text-green-700 dark:text-green-300 flex items-center">
@@ -211,7 +206,6 @@ const ChatSidebar = ({
                 </div>
               )}
               
-              {/* Role Filter Badge */}
               {roleFilter && !specificUserFilter && (
                 <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
                   <span className="text-xs text-blue-700 dark:text-blue-300 flex items-center">
@@ -232,7 +226,6 @@ const ChatSidebar = ({
         </div>
       )}
 
-      {/* Online Users Count */}
       <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
         <div className="flex justify-between items-center text-xs">
           <span className="text-gray-500 dark:text-gray-400">
@@ -248,8 +241,7 @@ const ChatSidebar = ({
         </div>
       </div>
 
-      {/* User List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className={`overflow-y-auto ${userListHeight}`}>
         {loading ? (
           <div className="flex justify-center items-center h-24">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
@@ -279,11 +271,11 @@ const ChatSidebar = ({
             onSelectUser={onSelectConversation}
             onlineUsers={onlineUsers}
             highlightUser={specificUserFilter}
+            isMobile={isMobile}
           />
         )}
       </div>
 
-      {/* Debug Info - Remove in production */}
       {process.env.NODE_ENV === 'development' && (
         <div className="p-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500">
           <div>Debug: Total Users: {users.length} | Filtered: {filteredUsers.length}</div>

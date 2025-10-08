@@ -18,7 +18,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    // Mobile detection
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
     };
@@ -31,11 +30,9 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
     if (conversation) {
       fetchMessages();
       
-      // Join the conversation room
       if (socket) {
         socket.emit('join', conversation._id);
         
-        // Listen for new messages
         socket.on('message', (message) => {
           console.log('New message received:', message);
           if (message.conversationId === conversation._id) {
@@ -43,7 +40,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
-        // Listen for typing indicators
         socket.on('typing', (data) => {
           if (data.conversationId === conversation._id) {
             if (data.isTyping) {
@@ -54,7 +50,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
-        // Listen for recording indicators
         socket.on('recording', (data) => {
           if (data.conversationId === conversation._id) {
             if (data.isRecording) {
@@ -65,19 +60,16 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           }
         });
 
-        // Listen for online users updates
         socket.on('onlineUsers', (onlineUserIds) => {
           setOnlineUsers(onlineUserIds || []);
         });
 
-        // Listen for file upload progress
         socket.on('fileUploadProgress', (data) => {
           if (data.conversationId === conversation._id) {
             console.log(`File upload progress: ${data.progress}%`);
           }
         });
 
-        // Listen for audio playback events
         socket.on('audioPlayback', (data) => {
           if (data.conversationId === conversation._id) {
             console.log(`User ${data.userId} is ${data.isPlaying ? 'playing' : 'paused'} audio message ${data.messageId}`);
@@ -231,8 +223,9 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
 
   const participant = getParticipant();
 
-  // NEW: Responsive dimensions
-  const chatHeight = isMobile ? 'h-[calc(100vh-120px)]' : 'h-[600px]';
+  // Responsive dimensions
+  const chatHeight = isMobile ? 'h-[500px]' : 'h-[600px]';
+  const messagesHeight = isMobile ? 'h-[380px]' : 'h-[480px]';
   const headerPadding = isMobile ? 'p-2' : 'p-3';
   const messagePadding = isMobile ? 'p-1' : 'p-2';
   const textSize = isMobile ? 'text-xs' : 'text-sm';
@@ -250,7 +243,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
 
   return (
     <div className={`flex flex-col h-full bg-white dark:bg-gray-800 ${chatHeight}`}>
-      {/* Header */}
       <div className={`${headerPadding} border-b border-gray-200 dark:border-gray-700 flex items-center`}>
         {(isEmbedded || isMobile) && (
           <button
@@ -284,7 +276,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
           </div>
         </div>
         
-        {/* Refresh Button */}
         <button
           onClick={handleRetry}
           disabled={loading}
@@ -304,8 +295,7 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
         )}
       </div>
 
-      {/* Messages */}
-      <div className={`flex-1 overflow-y-auto ${messagePadding}`}>
+      <div className={`flex-1 overflow-y-auto ${messagePadding} ${messagesHeight}`}>
         {loading ? (
           <div className="flex justify-center items-center h-full">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
@@ -348,7 +338,6 @@ const ChatWindow = ({ conversation, onClose, socket, isEmbedded = false, onToggl
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <MessageInput 
         onSendMessage={handleSendMessage}
         onTyping={handleTyping}

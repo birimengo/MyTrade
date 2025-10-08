@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-54d0af47'], (function (workbox) { 'use strict';
+define(['./workbox-ce4f0d5f'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -82,11 +82,20 @@ define(['./workbox-54d0af47'], (function (workbox) { 'use strict';
     "revision": "3ca0b8505b4bec776b69afdba2768812"
   }, {
     "url": "index.html",
-    "revision": "0.damras07tj"
+    "revision": "0.5ltq2ijjor"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
     allowlist: [/^\/$/]
   }));
+  workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.CacheFirst({
+    "cacheName": "google-fonts-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 10,
+      maxAgeSeconds: 31536000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
 
 }));

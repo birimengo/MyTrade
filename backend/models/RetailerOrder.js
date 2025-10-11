@@ -38,9 +38,7 @@ const retailerOrderSchema = new mongoose.Schema({
   measurementUnit: {
     type: String,
     required: true,
-    enum: [
-      'kg', 'g', 'liters', 'ml', 'pieces', 'bags', 'crates', 'boxes', 'units'
-    ],
+    // REMOVED ENUM RESTRICTION - Accept any measurement unit
   },
   deliveryPlace: {
     type: String,

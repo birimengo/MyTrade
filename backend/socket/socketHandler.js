@@ -1,21 +1,20 @@
-// backend/socket/socketHandler.js
+// backend/socket/socketHandler.js - Enhanced version
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
 
 const handleSocketConnection = (io) => {
   const onlineUsers = new Map(); // userId -> socketId
-  const typingUsers = new Map(); // conversationId -> Set of userIds
-  const recordingUsers = new Map(); // conversationId -> Set of userIds
+  const userSockets = new Map(); // userId -> Set of socketIds (for multiple devices)
+  const typingUsers = new Map();
+  const recordingUsers = new Map();
 
-  // Function to broadcast online users list
   const broadcastOnlineUsers = () => {
     const onlineUserIds = Array.from(onlineUsers.keys());
     io.emit('onlineUsers', onlineUserIds);
     console.log(`📊 Online users: ${onlineUserIds.length} users`);
   };
 
-  // Function to update user status and notify
   const updateUserStatus = async (userId, isOnline) => {
     try {
       await User.findByIdAndUpdate(userId, {
@@ -23,7 +22,6 @@ const handleSocketConnection = (io) => {
         lastSeen: new Date()
       });
 
-      // Notify all users about status change
       io.emit('userStatusChanged', {
         userId,
         isOnline,
@@ -37,80 +35,102 @@ const handleSocketConnection = (io) => {
   };
 
   io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+    console.log('🔌 New socket connection:', socket.id);
+    
+    // Send immediate connection confirmation
+    socket.emit('connected', { 
+      socketId: socket.id, 
+      message: 'Connected to server successfully' 
+    });
 
-    // Handle user joining with authentication
-    socket.on('authenticate', async (userId) => {
+    // Enhanced authentication with device tracking
+    socket.on('authenticate', async (data) => {
       try {
+        const userId = typeof data === 'string' ? data : data.userId;
+        const deviceId = data.deviceId || socket.id;
+        
         if (!userId) {
-          console.log('No user ID provided for authentication');
+          socket.emit('authentication_failed', { message: 'User ID required' });
           return;
         }
 
-        // Verify user exists
         const user = await User.findById(userId);
         if (!user) {
-          console.error('User not found:', userId);
+          socket.emit('authentication_failed', { message: 'User not found' });
           return;
         }
 
-        // Store user connection
-        onlineUsers.set(userId, socket.id);
+        // Store user connection with device tracking
         socket.userId = userId;
+        socket.deviceId = deviceId;
+        
+        onlineUsers.set(userId, socket.id);
+        
+        // Track multiple sockets per user
+        if (!userSockets.has(userId)) {
+          userSockets.set(userId, new Set());
+        }
+        userSockets.get(userId).add(socket.id);
+        
+        // Join user room and conversation rooms
         socket.join(userId);
         
-        // Update user status
+        // Join user's conversations
+        const conversations = await Conversation.find({ participants: userId });
+        conversations.forEach(conv => {
+          socket.join(conv._id.toString());
+        });
+
         await updateUserStatus(userId, true);
-        
-        // Broadcast updated online users list
         broadcastOnlineUsers();
         
-        console.log(`✅ User ${userId} (${user.firstName} ${user.lastName}) authenticated with socket ${socket.id}`);
+        socket.emit('authenticated', { 
+          success: true, 
+          userId,
+          onlineUsers: Array.from(onlineUsers.keys())
+        });
+        
+        console.log(`✅ User ${userId} authenticated from device ${deviceId}`);
+        
       } catch (error) {
-        console.error('Error in authenticate event:', error);
+        console.error('Authentication error:', error);
+        socket.emit('authentication_failed', { message: error.message });
       }
     });
 
-    // Handle user joining (legacy support)
-    socket.on('join', async (userId) => {
-      try {
-        onlineUsers.set(userId, socket.id);
-        socket.userId = userId;
-        socket.join(userId);
-        
-        // Update user's online status in database
-        await updateUserStatus(userId, true);
-        
-        console.log(`User ${userId} joined with socket ${socket.id}`);
-      } catch (error) {
-        console.error('Error in join event:', error);
-      }
-    });
-
-    // Handle sending messages (your existing code)
-    socket.on('sendMessage', async (data) => {
+    // Enhanced message sending with better error handling
+    socket.on('sendMessage', async (data, callback) => {
       try {
         console.log('📨 Processing message:', {
           conversationId: data.conversationId,
           senderId: data.senderId,
-          type: data.type || 'text',
-          hasFile: !!data.fileUrl,
-          content: data.content ? data.content.substring(0, 50) + '...' : 'File message'
-        });
-        
-        // Verify conversation exists and user is a participant
-        const conversation = await Conversation.findOne({
-          _id: data.conversationId,
-          participants: data.senderId
+          type: data.type || 'text'
         });
 
-        if (!conversation) {
-          console.error('Conversation not found or user not authorized');
-          socket.emit('error', 'Not authorized to send messages in this conversation');
+        // Validate required fields
+        if (!data.conversationId || !data.senderId) {
+          const error = 'Missing required fields: conversationId and senderId are required';
+          console.error(error);
+          if (callback) callback({ success: false, error });
+          socket.emit('message_error', { error });
           return;
         }
 
-        // Save message to database with ALL file metadata
+        // Verify conversation and authorization
+        const conversation = await Conversation.findOne({
+          _id: data.conversationId,
+          participants: data.senderId
+        }).populate('participants', '_id');
+
+        if (!conversation) {
+          const error = 'Conversation not found or user not authorized';
+          console.error(error);
+          if (callback) callback({ success: false, error });
+          socket.emit('message_error', { error });
+          return;
+        }
+
+        // Create message with proper file metadata
         const messageData = {
           conversationId: data.conversationId,
           senderId: data.senderId,
@@ -120,128 +140,147 @@ const handleSocketConnection = (io) => {
           fileName: data.fileName || '',
           fileSize: data.fileSize || 0,
           fileType: data.fileType || '',
-          cloudinaryPublicId: data.cloudinaryPublicId || ''
+          cloudinaryPublicId: data.cloudinaryPublicId || '',
+          // Add React Native specific fields
+          localUri: data.localUri || '', // For React Native file references
+          thumbnailUrl: data.thumbnailUrl || '' // For image/video previews
         };
 
         const message = await Message.create(messageData);
-
-        // Populate ALL fields including file information
         const populatedMessage = await Message.findById(message._id)
-          .populate('senderId', 'firstName lastName businessName');
+          .populate('senderId', 'firstName lastName businessName avatarUrl');
 
         if (!populatedMessage) {
           throw new Error('Failed to populate message');
         }
 
-        // Update conversation last message
+        // Update conversation
         let lastMessageContent = data.content || '';
-        if (data.type === 'audio') {
-          lastMessageContent = 'Voice message';
-        } else if (data.type === 'image') {
-          lastMessageContent = 'Sent an image';
-        } else if (data.type === 'document') {
-          lastMessageContent = `Sent a file: ${data.fileName || 'file'}`;
-        }
+        if (data.type === 'audio') lastMessageContent = '🎤 Voice message';
+        else if (data.type === 'image') lastMessageContent = '🖼️ Image';
+        else if (data.type === 'document') lastMessageContent = `📄 ${data.fileName || 'File'}`;
 
         await Conversation.findByIdAndUpdate(data.conversationId, {
           lastMessage: lastMessageContent,
           lastMessageAt: new Date()
         });
 
-        // Get updated conversation with participants
-        const updatedConversation = await Conversation.findById(data.conversationId)
-          .populate('participants', 'firstName lastName businessName role');
+        // Format message for client
+        const messageForClient = {
+          _id: populatedMessage._id,
+          conversationId: populatedMessage.conversationId,
+          senderId: {
+            _id: populatedMessage.senderId._id,
+            firstName: populatedMessage.senderId.firstName,
+            lastName: populatedMessage.senderId.lastName,
+            businessName: populatedMessage.senderId.businessName,
+            avatarUrl: populatedMessage.senderId.avatarUrl
+          },
+          content: populatedMessage.content,
+          type: populatedMessage.type,
+          fileUrl: populatedMessage.fileUrl,
+          fileName: populatedMessage.fileName,
+          fileSize: populatedMessage.fileSize,
+          fileType: populatedMessage.fileType,
+          cloudinaryPublicId: populatedMessage.cloudinaryPublicId,
+          localUri: populatedMessage.localUri,
+          thumbnailUrl: populatedMessage.thumbnailUrl,
+          readBy: populatedMessage.readBy || [],
+          createdAt: populatedMessage.createdAt,
+          updatedAt: populatedMessage.updatedAt
+        };
 
-        if (!updatedConversation) {
-          throw new Error('Failed to populate conversation');
-        }
-
-        // Send to all participants with complete message data
-        updatedConversation.participants.forEach(participant => {
-          io.to(participant._id.toString()).emit('message', {
-            _id: populatedMessage._id,
-            conversationId: populatedMessage.conversationId,
-            senderId: {
-              _id: populatedMessage.senderId._id,
-              firstName: populatedMessage.senderId.firstName,
-              lastName: populatedMessage.senderId.lastName,
-              businessName: populatedMessage.senderId.businessName
-            },
-            content: populatedMessage.content,
-            type: populatedMessage.type,
-            fileUrl: populatedMessage.fileUrl,
-            fileName: populatedMessage.fileName,
-            fileSize: populatedMessage.fileSize,
-            fileType: populatedMessage.fileType,
-            cloudinaryPublicId: populatedMessage.cloudinaryPublicId,
-            readBy: populatedMessage.readBy,
-            createdAt: populatedMessage.createdAt,
-            updatedAt: populatedMessage.updatedAt
+        // Send to all conversation participants
+        conversation.participants.forEach(participant => {
+          io.to(participant._id.toString()).emit('message', messageForClient);
+          io.to(participant._id.toString()).emit('conversation_updated', {
+            conversationId: conversation._id,
+            lastMessage: lastMessageContent,
+            lastMessageAt: new Date()
           });
-          
-          io.to(participant._id.toString()).emit('conversationUpdate', updatedConversation);
         });
 
-        console.log('✅ Message saved and broadcasted:', populatedMessage._id);
+        // Send success callback
+        if (callback) {
+          callback({ 
+            success: true, 
+            message: messageForClient,
+            messageId: message._id 
+          });
+        }
+
+        console.log('✅ Message delivered to all participants');
 
       } catch (error) {
-        console.error('Error sending message:', error);
-        socket.emit('error', 'Failed to send message: ' + error.message);
+        console.error('❌ Message sending error:', error);
+        if (callback) {
+          callback({ 
+            success: false, 
+            error: error.message 
+          });
+        }
+        socket.emit('message_error', { 
+          error: 'Failed to send message: ' + error.message 
+        });
       }
     });
 
-    // Handle typing indicators (your existing code)
+    // Enhanced typing indicators
     socket.on('typing', (data) => {
-      const { conversationId, isTyping } = data;
-      
-      if (isTyping) {
-        if (!typingUsers.has(conversationId)) {
-          typingUsers.set(conversationId, new Set());
+      try {
+        const { conversationId, isTyping } = data;
+        
+        if (!conversationId) {
+          console.error('Missing conversationId in typing event');
+          return;
         }
-        typingUsers.get(conversationId).add(socket.userId);
-      } else {
-        if (typingUsers.has(conversationId)) {
-          typingUsers.get(conversationId).delete(socket.userId);
-          if (typingUsers.get(conversationId).size === 0) {
-            typingUsers.delete(conversationId);
+
+        if (isTyping) {
+          if (!typingUsers.has(conversationId)) {
+            typingUsers.set(conversationId, new Set());
+          }
+          typingUsers.get(conversationId).add(socket.userId);
+        } else {
+          if (typingUsers.has(conversationId)) {
+            typingUsers.get(conversationId).delete(socket.userId);
+            if (typingUsers.get(conversationId).size === 0) {
+              typingUsers.delete(conversationId);
+            }
           }
         }
-      }
-      
-      // Notify other participants in the conversation
-      socket.to(conversationId).emit('typing', {
-        userId: socket.userId,
-        isTyping,
-        conversationId
-      });
-    });
+        
+        // Notify other participants
+        socket.to(conversationId).emit('typing', {
+          userId: socket.userId,
+          isTyping,
+          conversationId,
+          timestamp: new Date()
+        });
 
-    // Handle user going offline manually
-    socket.on('userOffline', async () => {
-      if (socket.userId) {
-        await updateUserStatus(socket.userId, false);
-        onlineUsers.delete(socket.userId);
-        broadcastOnlineUsers();
+      } catch (error) {
+        console.error('Error handling typing event:', error);
       }
     });
 
-    // Handle user going online manually
-    socket.on('userOnline', async () => {
-      if (socket.userId) {
-        onlineUsers.set(socket.userId, socket.id);
-        await updateUserStatus(socket.userId, true);
-        broadcastOnlineUsers();
-      }
-    });
-
-    // Handle disconnect
-    socket.on('disconnect', async () => {
+    // Enhanced disconnect handling
+    socket.on('disconnect', async (reason) => {
       try {
+        console.log(`🔌 Socket disconnected: ${socket.id}, reason: ${reason}`);
+        
         if (socket.userId) {
-          await updateUserStatus(socket.userId, false);
-          onlineUsers.delete(socket.userId);
-          broadcastOnlineUsers();
-          
+          // Remove this specific socket from user's sockets
+          if (userSockets.has(socket.userId)) {
+            userSockets.get(socket.userId).delete(socket.id);
+            
+            // If user has no more connected sockets, mark as offline
+            if (userSockets.get(socket.userId).size === 0) {
+              userSockets.delete(socket.userId);
+              onlineUsers.delete(socket.userId);
+              await updateUserStatus(socket.userId, false);
+              broadcastOnlineUsers();
+            }
+          }
+
           // Clean up typing status
           for (const [conversationId, usersSet] of typingUsers.entries()) {
             if (usersSet.has(socket.userId)) {
@@ -256,95 +295,60 @@ const handleSocketConnection = (io) => {
               });
             }
           }
-          
-          // Clean up recording status
-          for (const [conversationId, usersSet] of recordingUsers.entries()) {
-            if (usersSet.has(socket.userId)) {
-              usersSet.delete(socket.userId);
-              if (usersSet.size === 0) {
-                recordingUsers.delete(conversationId);
-              }
-              socket.to(conversationId).emit('recording', {
-                userId: socket.userId,
-                isRecording: false,
-                conversationId
-              });
-            }
-          }
         }
-        console.log('User disconnected:', socket.id);
+        
       } catch (error) {
         console.error('Error handling disconnect:', error);
       }
     });
 
-    // Handle recording, file upload, message read, etc. (your existing code)
-    socket.on('recording', (data) => {
-      const { conversationId, isRecording } = data;
-      
-      if (isRecording) {
-        if (!recordingUsers.has(conversationId)) {
-          recordingUsers.set(conversationId, new Set());
-        }
-        recordingUsers.get(conversationId).add(socket.userId);
-      } else {
-        if (recordingUsers.has(conversationId)) {
-          recordingUsers.get(conversationId).delete(socket.userId);
-          if (recordingUsers.get(conversationId).size === 0) {
-            recordingUsers.delete(conversationId);
-          }
-        }
-      }
-      
-      socket.to(conversationId).emit('recording', {
-        userId: socket.userId,
-        isRecording,
-        conversationId
+    // Heartbeat for connection monitoring
+    socket.on('heartbeat', (data) => {
+      socket.emit('heartbeat_ack', { 
+        timestamp: new Date(),
+        ...data 
       });
     });
 
-    socket.on('fileUploadProgress', (data) => {
-      const { conversationId, progress } = data;
-      
-      socket.to(conversationId).emit('fileUploadProgress', {
-        userId: socket.userId,
-        progress,
-        conversationId
-      });
-    });
-
-    socket.on('markAsRead', async (data) => {
+    // Join specific conversation
+    socket.on('join_conversation', async (conversationId) => {
       try {
-        const { conversationId, messageId } = data;
-        
-        await Message.findByIdAndUpdate(messageId, {
-          $addToSet: { readBy: socket.userId }
-        });
-
-        const message = await Message.findById(messageId);
-        if (message && message.senderId.toString() !== socket.userId) {
-          io.to(message.senderId.toString()).emit('messageRead', {
-            messageId,
-            readBy: socket.userId,
-            readAt: new Date()
-          });
+        if (!conversationId) {
+          socket.emit('error', { message: 'conversationId is required' });
+          return;
         }
+        
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation || !conversation.participants.includes(socket.userId)) {
+          socket.emit('error', { message: 'Conversation not found or access denied' });
+          return;
+        }
+        
+        socket.join(conversationId);
+        socket.emit('conversation_joined', { conversationId });
+        
       } catch (error) {
-        console.error('Error marking message as read:', error);
+        console.error('Error joining conversation:', error);
+        socket.emit('error', { message: error.message });
       }
     });
 
-    socket.on('audioPlayback', (data) => {
-      const { conversationId, messageId, isPlaying } = data;
-      
-      socket.to(conversationId).emit('audioPlayback', {
-        userId: socket.userId,
-        messageId,
-        isPlaying,
-        conversationId
-      });
+    // Leave conversation
+    socket.on('leave_conversation', (conversationId) => {
+      socket.leave(conversationId);
+      socket.emit('conversation_left', { conversationId });
+    });
+
+    // Error handling for socket
+    socket.on('error', (error) => {
+      console.error('Socket error:', error);
     });
   });
+
+  // Periodically clean up stale connections
+  setInterval(() => {
+    console.log(`🔄 Connection stats: ${onlineUsers.size} online users, ${userSockets.size} users with sockets`);
+  }, 30000); // Log every 30 seconds
 };
 
 module.exports = { handleSocketConnection };

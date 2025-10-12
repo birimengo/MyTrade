@@ -72,13 +72,8 @@ const connectDB = async () => {
     
     // Updated connection options for Mongoose 7+ - removed deprecated options
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      // Remove deprecated options that cause errors in newer Mongoose versions
-      // useNewUrlParser: true,      // No longer needed in Mongoose 6+
-      // useUnifiedTopology: true,   // No longer needed in Mongoose 6+
-      // bufferMaxEntries: 0,        // Deprecated - remove this line
       serverSelectionTimeoutMS: 30000, // Increased timeout
       socketTimeoutMS: 45000,
-      // Keep bufferCommands if needed, but remove deprecated options
       bufferCommands: false
     });
 
@@ -112,17 +107,20 @@ const connectDB = async () => {
 const app = express();
 const server = http.createServer(app);
 
-// Enhanced CORS configuration for production - ADDED NETLIFY DOMAIN
+// Enhanced CORS configuration for production - EXPANDED FOR ALL PLATFORMS
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173', 
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5173',
-  'https://my-trade.vercel.app', // Your Vercel frontend
-  'https://mytrade-cx5z.onrender.com', // Your Render backend (for API calls between services)
+  'http://localhost:8081',
+  'http://192.168.86.3:8081',
+  'exp://192.168.86.3:8081',
+  'exp://*',
+  'https://my-trade.vercel.app',
+  'https://mytrade-cx5z.onrender.com',
   'https://mytradeug.netlify.app',
-  'https://mytradeuganda.netlify.app' // ADDED: Your Netlify frontend domain
-
+  'https://mytradeuganda.netlify.app'
 ];
 
 const io = socketIo(server, {
@@ -130,20 +128,27 @@ const io = socketIo(server, {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    transports: ['websocket', 'polling']
   }
 });
 
 const PORT = process.env.PORT || 5000;
 
-// Enhanced CORS configuration with production support - EXPANDED FOR NETLIFY
+// Enhanced CORS configuration with production support - EXPANDED FOR ALL PLATFORMS
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, postman, etc.)
     if (!origin) return callback(null, true);
     
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
+    // Check if origin is in allowed list or matches patterns
+    if (allowedOrigins.includes(origin) ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        origin.includes('192.168.') ||
+        origin.includes('exp://') ||
+        origin.includes('netlify.app') ||
+        origin.includes('vercel.app')) {
       return callback(null, true);
     } else {
       console.log('CORS blocked for origin:', origin);
@@ -154,11 +159,19 @@ app.use(cors({
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-Platform', 'X-Device-Id']
 }));
 
 // Handle preflight requests
 app.options('*', cors());
+
+// Security headers middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
 // Increase payload size limit for file uploads
 app.use(express.json({ limit: '50mb' }));
@@ -188,6 +201,113 @@ app.use('/api/supplier-receipts', supplierReceiptRoutes);
 app.use('/api/certified-products', certifiedProductsRoutes);
 app.use('/api/system-stocks', systemStockRoutes);
 app.use('/api/retailer-stocks', retailerStockRoutes);
+
+// NEW: React Native specific endpoints
+app.get('/api/react-native-test', (req, res) => {
+  const clientInfo = {
+    userAgent: req.headers['user-agent'],
+    origin: req.headers['origin'],
+    platform: req.headers['x-platform'] || 'unknown',
+    deviceId: req.headers['x-device-id'] || 'unknown',
+    appVersion: req.headers['x-app-version'] || 'unknown'
+  };
+
+  console.log('📱 React Native Test Request:', clientInfo);
+
+  res.json({
+    success: true,
+    message: 'React Native connection successful!',
+    serverTime: new Date().toISOString(),
+    clientInfo: clientInfo,
+    environment: process.env.NODE_ENV,
+    socketUrl: process.env.SOCKET_SERVER_URL || `https://mytrade-cx5z.onrender.com`
+  });
+});
+
+// NEW: Environment variables check (safe - no sensitive data)
+app.get('/api/env-check', (req, res) => {
+  res.json({
+    success: true,
+    environment: process.env.NODE_ENV || 'development',
+    port: process.env.PORT || 5000,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    cloudinary: process.env.CLOUDINARY_URL ? 'configured' : 'not configured',
+    googleApis: {
+      places: process.env.GOOGLE_PLACES_API_KEY ? 'configured' : 'not configured',
+      geocoding: process.env.GOOGLE_GEOCODING_API_KEY ? 'configured' : 'not configured',
+      maps: process.env.GOOGLE_MAPS_JAVASCRIPT_API_KEY ? 'configured' : 'not configured'
+    },
+    features: {
+      socket: true,
+      fileUpload: true,
+      realTimeChat: true,
+      notifications: true
+    }
+  });
+});
+
+// NEW: Mobile connection diagnostics
+app.get('/api/mobile-diagnostics', async (req, res) => {
+  try {
+    const diagnostics = {
+      server: {
+        status: 'running',
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+      },
+      database: {
+        status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        state: getMongooseReadyState(mongoose.connection.readyState),
+        collections: []
+      },
+      services: {
+        cloudinary: process.env.CLOUDINARY_URL ? 'available' : 'unavailable',
+        socket: 'available'
+      },
+      endpoints: {
+        auth: '/api/auth',
+        users: '/api/users',
+        conversations: '/api/conversations',
+        messages: '/api/messages',
+        health: '/api/health'
+      }
+    };
+
+    // Get collection info if database is connected
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const collections = await mongoose.connection.db.listCollections().toArray();
+        diagnostics.database.collections = collections.map(c => c.name);
+      } catch (error) {
+        diagnostics.database.collectionsError = error.message;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Mobile diagnostics completed',
+      ...diagnostics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Diagnostics failed',
+      error: error.message
+    });
+  }
+});
+
+// NEW: Socket connection test endpoint
+app.get('/api/socket-test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Socket.IO server is running',
+    socketUrl: `https://mytrade-cx5z.onrender.com`,
+    supportedTransports: ['websocket', 'polling'],
+    features: ['real-time messaging', 'typing indicators', 'online status', 'file sharing']
+  });
+});
 
 // Enhanced health check endpoint with detailed diagnostics
 app.get('/api/health', async (req, res) => {
@@ -253,7 +373,8 @@ app.get('/api/health', async (req, res) => {
       server: {
         port: PORT,
         platform: process.platform,
-        nodeVersion: process.version
+        nodeVersion: process.version,
+        uptime: process.uptime()
       },
       database: databaseInfo,
       databaseTest: dbTest,
@@ -265,7 +386,15 @@ app.get('/api/health', async (req, res) => {
       cors: {
         enabled: true,
         allowedOrigins: allowedOrigins,
-        netlifyFrontend: 'https://mytradeug.netlify.app'
+        netlifyFrontend: 'https://mytradeug.netlify.app',
+        vercelFrontend: 'https://my-trade.vercel.app',
+        reactNative: 'exp://192.168.86.3:8081'
+      },
+      features: {
+        realTimeChat: true,
+        fileUpload: true,
+        notifications: true,
+        multiPlatform: true
       },
       routes: [
         '/api/auth',
@@ -279,7 +408,10 @@ app.get('/api/health', async (req, res) => {
         '/api/transporters',
         '/api/health',
         '/api/test-db',
-        '/api/test-mongodb'
+        '/api/test-mongodb',
+        '/api/react-native-test',
+        '/api/mobile-diagnostics',
+        '/api/socket-test'
       ]
     });
   } catch (error) {
@@ -746,7 +878,11 @@ app.use('*', (req, res) => {
       '/api/test-retailers',
       '/api/test-transporter-status',
       '/api/test-orders',
-      '/api/test-password-reset'
+      '/api/test-password-reset',
+      '/api/react-native-test',
+      '/api/mobile-diagnostics',
+      '/api/socket-test',
+      '/api/env-check'
     ]
   });
 });
@@ -838,11 +974,12 @@ const startServer = async () => {
   
   server.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
-    console.log(`🏥 Health check available at: http://localhost:${PORT}/api/health`);
-    console.log(`🌐 API base URL: http://localhost:${PORT}/api`);
+    console.log(`🏥 Health check available at: https://mytrade-cx5z.onrender.com/api/health`);
+    console.log(`🌐 API base URL: https://mytrade-cx5z.onrender.com/api`);
     console.log(`🔌 Socket.IO server running`);
     console.log(`☁️  Cloudinary configured for file uploads`);
-    console.log(`🌍 CORS enabled for origins:`, allowedOrigins);
+    console.log(`🌍 CORS enabled for ${allowedOrigins.length} origins`);
+    console.log(`📱 React Native support: Enabled`);
     
     if (isConnected) {
       console.log(`🗄️  MongoDB connected: ${mongoose.connection.name}`);
@@ -853,13 +990,15 @@ const startServer = async () => {
     }
     
     console.log(`📊 Available APIs:`);
-    console.log(`   - Wholesalers: http://localhost:${PORT}/api/wholesalers`);
-    console.log(`   - Retailers: http://localhost:${PORT}/api/retailers`);
-    console.log(`   - Products: http://localhost:${PORT}/api/products`);
-    console.log(`   - Retailer Orders: http://localhost:${PORT}/api/retailer-orders`);
-    console.log(`   - Transporters: http://localhost:${PORT}/api/transporters`);
-    console.log(`   - Password Reset: http://localhost:${PORT}/api/auth/forgot-password`);
-    console.log(`   - System Health: http://localhost:${PORT}/api/health`);
+    console.log(`   - Wholesalers: /api/wholesalers`);
+    console.log(`   - Retailers: /api/retailers`);
+    console.log(`   - Products: /api/products`);
+    console.log(`   - Retailer Orders: /api/retailer-orders`);
+    console.log(`   - Transporters: /api/transporters`);
+    console.log(`   - Password Reset: /api/auth/forgot-password`);
+    console.log(`   - System Health: /api/health`);
+    console.log(`   - React Native Test: /api/react-native-test`);
+    console.log(`   - Mobile Diagnostics: /api/mobile-diagnostics`);
   });
 };
 

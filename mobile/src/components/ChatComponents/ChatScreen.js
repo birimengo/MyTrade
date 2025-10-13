@@ -14,9 +14,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Keyboard,
-  Animated,
-  PermissionsAndroid
+  Keyboard
 } from 'react-native';
 import { useSocket } from '../../context/SocketContext';
 import { useAuth } from '../../context/AuthContext';
@@ -25,7 +23,6 @@ import { API_BASE_URL } from '../../config/api';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Audio } from 'expo-av';
 
 const { width, height } = Dimensions.get('window');
 
@@ -56,27 +53,11 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
   const [selectedImages, setSelectedImages] = useState([]);
   const [showImageSelection, setShowImageSelection] = useState(false);
 
-  // Voice recording states
-  const [recording, setRecording] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  const [recordingWaveform, setRecordingWaveform] = useState([]);
-  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
-  const [audioPermission, setAudioPermission] = useState(null);
-
-  // Audio playback states
-  const [sound, setSound] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentPlayingId, setCurrentPlayingId] = useState(null);
-
   // Refs
   const flatListRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const initializationRef = useRef(false);
   const textInputRef = useRef(null);
-  const recordingIntervalRef = useRef(null);
-  const waveformIntervalRef = useRef(null);
-  const recordingAnimation = useRef(new Animated.Value(0)).current;
 
   // Memoized values
   const participant = useMemo(() => {
@@ -92,36 +73,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
     return conversationId && (typingUsers[conversationId] || []).length > 0;
   }, [conversationId, typingUsers]);
 
-  // Request audio permissions
-  useEffect(() => {
-    const requestAudioPermission = async () => {
-      try {
-        if (Platform.OS === 'android') {
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-            {
-              title: 'Audio Recording Permission',
-              message: 'This app needs access to your microphone to send voice messages.',
-              buttonNeutral: 'Ask Me Later',
-              buttonNegative: 'Cancel',
-              buttonPositive: 'OK',
-            }
-          );
-          setAudioPermission(granted === PermissionsAndroid.RESULTS.GRANTED);
-        } else {
-          const { status } = await Audio.requestPermissionsAsync();
-          setAudioPermission(status === 'granted');
-        }
-      } catch (err) {
-        console.error('Error requesting audio permission:', err);
-        setAudioPermission(false);
-      }
-    };
-
-    requestAudioPermission();
-  }, []);
-
-  // Keyboard handling
+  // Keyboard handling - Improved to prevent input hiding
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -129,6 +81,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
         const keyboardHeight = e.endCoordinates.height;
         setKeyboardHeight(keyboardHeight);
         
+        // Scroll to bottom when keyboard appears
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
@@ -147,277 +100,6 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
       keyboardDidHideListener.remove();
     };
   }, []);
-
-  // Voice recording functions
-  const startRecording = async () => {
-    try {
-      if (audioPermission === false) {
-        Alert.alert('Permission Required', 'Please grant microphone permission to record voice messages.');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
-
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-
-      setRecording(recording);
-      setIsRecording(true);
-      setRecordingDuration(0);
-      setRecordingWaveform([]);
-      setShowVoiceRecorder(true);
-
-      // Start recording animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(recordingAnimation, {
-            toValue: 1,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(recordingAnimation, {
-            toValue: 0,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Update recording duration
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-
-      // Simulate waveform
-      waveformIntervalRef.current = setInterval(() => {
-        setRecordingWaveform(prev => {
-          const newWave = Math.random() * 40 + 10;
-          return [...prev.slice(-20), newWave];
-        });
-      }, 100);
-
-      trackEvent('VOICE_RECORDING_START');
-    } catch (error) {
-      trackError('VOICE_RECORDING_START_ERROR', error);
-      Alert.alert('Recording Error', 'Failed to start recording. Please try again.');
-    }
-  };
-
-  const stopRecording = async () => {
-    try {
-      if (!recording) return;
-
-      // Stop intervals
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-      }
-      if (waveformIntervalRef.current) {
-        clearInterval(waveformIntervalRef.current);
-      }
-
-      // Stop animation
-      recordingAnimation.stopAnimation();
-
-      // Stop recording
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      
-      setRecording(null);
-      setIsRecording(false);
-      setShowVoiceRecorder(false);
-
-      // If recording is too short, discard it
-      if (recordingDuration < 1) {
-        Alert.alert('Too Short', 'Recording must be at least 1 second long.');
-        return;
-      }
-
-      // Upload the recording
-      await uploadAudioFile(uri, recordingDuration);
-
-      trackEvent('VOICE_RECORDING_STOP', { duration: recordingDuration });
-    } catch (error) {
-      trackError('VOICE_RECORDING_STOP_ERROR', error);
-      Alert.alert('Recording Error', 'Failed to stop recording. Please try again.');
-    }
-  };
-
-  const cancelRecording = async () => {
-    try {
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-      }
-      if (waveformIntervalRef.current) {
-        clearInterval(waveformIntervalRef.current);
-      }
-
-      recordingAnimation.stopAnimation();
-
-      if (recording) {
-        await recording.stopAndUnloadAsync();
-      }
-
-      setRecording(null);
-      setIsRecording(false);
-      setRecordingDuration(0);
-      setRecordingWaveform([]);
-      setShowVoiceRecorder(false);
-
-      trackEvent('VOICE_RECORDING_CANCEL');
-    } catch (error) {
-      trackError('VOICE_RECORDING_CANCEL_ERROR', error);
-    }
-  };
-
-  const uploadAudioFile = async (uri, duration) => {
-    try {
-      trackEvent('AUDIO_UPLOAD_START', { duration });
-      
-      const fileName = `voice_message_${Date.now()}.m4a`;
-      
-      // Create form data
-      const formData = new FormData();
-      
-      // Append audio file with correct MIME type for iOS recordings
-      formData.append('file', {
-        uri: uri,
-        type: 'audio/m4a',
-        name: fileName,
-      });
-
-      // Append required fields
-      formData.append('conversationId', conversationId);
-      formData.append('senderId', user._id);
-      formData.append('duration', duration.toString());
-
-      console.log('📤 Uploading audio file:', {
-        fileName,
-        duration,
-        conversationId,
-        uri: uri.substring(0, 50) + '...'
-      });
-
-      // Upload to your existing endpoint
-      const response = await axios.post(`${API_BASE_URL}/api/messages/upload`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-        timeout: 30000,
-      });
-
-      if (response.data?.success) {
-        const serverMessage = response.data.message;
-        trackEvent('AUDIO_UPLOAD_SUCCESS', { 
-          messageId: serverMessage._id,
-          duration 
-        });
-        
-        console.log('✅ Audio upload successful:', serverMessage._id);
-        
-        // Add the message to local state immediately
-        setMessages(prev => {
-          const messageExists = prev.some(m => m._id === serverMessage._id);
-          if (messageExists) return prev;
-          
-          const newMessages = [...prev, serverMessage];
-          return newMessages;
-        });
-        
-        // Scroll to bottom
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-        
-      } else {
-        throw new Error('Upload failed - no success in response');
-      }
-      
-    } catch (error) {
-      console.error('❌ Audio upload error:', {
-        error: error.response?.data || error.message,
-        status: error.response?.status,
-        duration,
-        conversationId 
-      });
-      
-      trackError('AUDIO_UPLOAD_ERROR', error, { 
-        duration,
-        conversationId 
-      });
-      
-      Alert.alert(
-        'Upload Failed', 
-        `Failed to upload voice message: ${error.response?.data?.message || error.message}`
-      );
-    }
-  };
-
-  // Audio playback functions
-  const playAudio = async (audioUrl, messageId) => {
-    try {
-      // Stop currently playing audio
-      if (sound) {
-        await sound.stopAsync();
-        await sound.unloadAsync();
-      }
-
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        { shouldPlay: true }
-      );
-
-      setSound(newSound);
-      setIsPlaying(true);
-      setCurrentPlayingId(messageId);
-
-      newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.didJustFinish) {
-          setIsPlaying(false);
-          setCurrentPlayingId(null);
-        }
-      });
-
-      trackEvent('AUDIO_PLAYBACK_START', { messageId });
-    } catch (error) {
-      trackError('AUDIO_PLAYBACK_ERROR', error, { messageId });
-      Alert.alert('Playback Error', 'Could not play the audio message.');
-    }
-  };
-
-  const stopAudio = async () => {
-    try {
-      if (sound) {
-        await sound.stopAsync();
-        await sound.unloadAsync();
-        setSound(null);
-        setIsPlaying(false);
-        setCurrentPlayingId(null);
-      }
-    } catch (error) {
-      trackError('AUDIO_STOP_ERROR', error);
-    }
-  };
-
-  // Cleanup audio on unmount
-  useEffect(() => {
-    return () => {
-      if (sound) {
-        sound.unloadAsync();
-      }
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-      }
-      if (waveformIntervalRef.current) {
-        clearInterval(waveformIntervalRef.current);
-      }
-    };
-  }, [sound]);
 
   // Get or create conversation
   const getOrCreateConversation = async () => {
@@ -606,7 +288,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
     }
   }, [socket, conversationId]);
 
-  // File upload function
+  // File upload function - Updated to handle multiple files
   const uploadFile = async (uri, type, fileName, isMultiple = false) => {
     let uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -620,14 +302,14 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
       // Get file info
       const fileInfo = await FileSystem.getInfoAsync(uri);
       
-      // Append file
+      // Append file - matches your backend expectation
       formData.append('file', {
         uri: uri,
         type: getMimeType(type, fileName),
         name: fileName,
       });
 
-      // Append required fields
+      // Append required fields for your upload endpoint
       formData.append('conversationId', conversationId);
       formData.append('senderId', user._id);
 
@@ -654,7 +336,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
           isMultiple 
         });
         
-        // Add the message to local state immediately
+        // Add the message to local state immediately for instant display
         setMessages(prev => {
           const messageExists = prev.some(m => m._id === serverMessage._id);
           if (messageExists) return prev;
@@ -663,7 +345,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
           return newMessages;
         });
         
-        // Scroll to bottom
+        // Scroll to bottom after adding new message
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
@@ -715,7 +397,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
       if (fileName?.endsWith('.webp')) return 'image/webp';
       return 'image/jpeg';
     }
-    return 'image/jpeg';
+    return 'image/jpeg'; // Default to jpeg for images
   };
 
   // Send text message via socket
@@ -773,7 +455,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
     }
   };
 
-  // Image Picker
+  // Image Picker - Only multiple selection
   const pickImages = async () => {
     try {
       trackEvent('IMAGE_PICKER_OPEN');
@@ -787,10 +469,10 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
-        allowsMultipleSelection: true,
-        allowsEditing: false,
+        allowsMultipleSelection: true, // Enable multiple selection
+        allowsEditing: false, // Disable editing for multiple selection
         quality: 0.8,
-        selectionLimit: 10,
+        selectionLimit: 10, // Limit to 10 images
       });
 
       trackEvent('IMAGE_PICKER_RESULT', { 
@@ -895,12 +577,6 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
     });
   };
 
-  const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   // Render message content
   const renderMessageContent = (item) => {
     const isMyMessage = item.senderId?._id === user._id || item.senderId === user._id;
@@ -927,56 +603,6 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
                 isMyMessage ? styles.myFileText : styles.theirFileText
               ]}>
                 Image
-              </Text>
-            </View>
-          </TouchableOpacity>
-        );
-
-      case 'audio':
-        const isPlayingThis = currentPlayingId === item._id && isPlaying;
-        return (
-          <TouchableOpacity 
-            style={[
-              styles.audioMessageContainer,
-              isMyMessage ? styles.myAudioContainer : styles.theirAudioContainer
-            ]}
-            onPress={() => {
-              if (isPlayingThis) {
-                stopAudio();
-              } else {
-                playAudio(item.fileUrl, item._id);
-              }
-            }}
-          >
-            <View style={styles.audioPlayer}>
-              <Ionicons 
-                name={isPlayingThis ? "pause-circle" : "play-circle"} 
-                size={24} 
-                color={isMyMessage ? '#FFFFFF' : '#3B82F6'} 
-              />
-              <View style={styles.audioWaveform}>
-                <View style={[
-                  styles.audioProgress,
-                  { 
-                    width: isPlayingThis ? '50%' : '0%',
-                    backgroundColor: isMyMessage ? '#FFFFFF' : '#3B82F6'
-                  }
-                ]} />
-              </View>
-              <Text style={[
-                styles.audioDuration,
-                isMyMessage ? styles.myAudioText : styles.theirAudioText
-              ]}>
-                {formatDuration(item.duration || 0)}
-              </Text>
-            </View>
-            <View style={styles.fileInfo}>
-              <Ionicons name="mic" size={12} color={isMyMessage ? '#FFFFFF' : '#6B7280'} />
-              <Text style={[
-                styles.fileName,
-                isMyMessage ? styles.myFileText : styles.theirFileText
-              ]}>
-                Voice message
               </Text>
             </View>
           </TouchableOpacity>
@@ -1038,7 +664,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
     );
   };
 
-  // Attachment Menu - Compact design with microphone separate
+  // Attachment Menu - Simplified with only "Upload Images" option
   const renderAttachmentMenu = () => (
     <Modal
       visible={showAttachmentMenu}
@@ -1055,6 +681,12 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
           styles.attachmentMenu,
           isDarkMode && styles.darkAttachmentMenu,
         ]}>
+          <Text style={[
+            styles.attachmentMenuTitle,
+            isDarkMode && styles.darkText
+          ]}>
+            Add Images
+          </Text>
           <View style={styles.attachmentOptions}>
             <TouchableOpacity 
               style={styles.attachmentOption}
@@ -1067,99 +699,12 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
                 styles.attachmentOptionText,
                 isDarkMode && styles.darkText
               ]}>
-                Images
+                Upload Images
               </Text>
             </TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
-    </Modal>
-  );
-
-  // Voice Recorder Modal
-  const renderVoiceRecorder = () => (
-    <Modal
-      visible={showVoiceRecorder}
-      transparent
-      animationType="slide"
-      onRequestClose={cancelRecording}
-    >
-      <View style={[
-        styles.voiceRecorderContainer,
-        isDarkMode && styles.darkVoiceRecorderContainer
-      ]}>
-        <View style={styles.voiceRecorderHeader}>
-          <Text style={[
-            styles.voiceRecorderTitle,
-            isDarkMode && styles.darkText
-          ]}>
-            Recording...
-          </Text>
-          <Text style={[
-            styles.recordingDuration,
-            isDarkMode && styles.darkText
-          ]}>
-            {formatDuration(recordingDuration)}
-          </Text>
-        </View>
-
-        <View style={styles.waveformContainer}>
-          {recordingWaveform.map((height, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.waveformBar,
-                {
-                  height: height,
-                  backgroundColor: isDarkMode ? '#3B82F6' : '#2563EB',
-                }
-              ]}
-            />
-          ))}
-        </View>
-
-        <View style={styles.recordingIndicator}>
-          <Animated.View
-            style={[
-              styles.recordingDot,
-              {
-                backgroundColor: '#EF4444',
-                opacity: recordingAnimation,
-              }
-            ]}
-          />
-          <Text style={[
-            styles.recordingText,
-            isDarkMode && styles.darkText
-          ]}>
-            Recording in progress
-          </Text>
-        </View>
-
-        <View style={styles.voiceRecorderActions}>
-          <TouchableOpacity 
-            style={[
-              styles.cancelRecordingButton,
-              isDarkMode && styles.darkCancelButton
-            ]}
-            onPress={cancelRecording}
-          >
-            <Text style={[
-              styles.cancelRecordingText,
-              isDarkMode && styles.darkText
-            ]}>
-              Cancel
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.stopRecordingButton}
-            onPress={stopRecording}
-          >
-            <Ionicons name="stop" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
     </Modal>
   );
 
@@ -1402,7 +947,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
         </View>
       )}
 
-      {/* Messages List */}
+      {/* Messages List with increased space */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -1411,7 +956,7 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
         style={styles.messagesList}
         contentContainerStyle={[
           styles.messagesContainer,
-          { paddingBottom: keyboardHeight > 0 ? 80 : 20 }
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 60 : 20 }
         ]}
         onContentSizeChange={() => {
           if (messages.length > 0) {
@@ -1471,13 +1016,17 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
         </View>
       ))}
 
-      {/* Input Container - Fixed positioning */}
+      {/* Input Container with improved keyboard handling */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         style={[
           styles.inputContainer,
           isDarkMode && styles.darkInputContainer,
+          { 
+            marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+            paddingBottom: keyboardHeight > 0 ? 10 : Platform.OS === 'ios' ? 20 : 10
+          }
         ]}
       >
         <TouchableOpacity 
@@ -1487,23 +1036,9 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
           ]}
           onPress={() => setShowAttachmentMenu(true)}
         >
-          <Ionicons 
-            name="images" 
-            size={20} 
-            color={isDarkMode ? '#9CA3AF' : '#6B7280'} 
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[
-            styles.micButton,
-            isDarkMode && styles.darkMicButton
-          ]}
-          onPress={startRecording}
-        >
-          <Ionicons 
-            name="mic" 
-            size={20} 
+          <MaterialIcons 
+            name="attach-file" 
+            size={18} 
             color={isDarkMode ? '#9CA3AF' : '#6B7280'} 
           />
         </TouchableOpacity>
@@ -1537,14 +1072,13 @@ const ChatScreen = ({ selectedUser, isDarkMode, connectionStatus, onReconnect })
         >
           <Ionicons 
             name="send" 
-            size={18} 
+            size={16} 
             color={!input.trim() ? (isDarkMode ? '#6B7280' : '#9CA3AF') : '#FFFFFF'} 
           />
         </TouchableOpacity>
       </KeyboardAvoidingView>
 
       {renderAttachmentMenu()}
-      {renderVoiceRecorder()}
       {renderImageSelection()}
       {renderImagePreview()}
     </View>
@@ -1566,11 +1100,11 @@ const styles = StyleSheet.create({
   // Compact Header Styles
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 8, // Reduced padding
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
-    minHeight: 50,
+    minHeight: 50, // Reduced height
   },
   darkHeader: {
     backgroundColor: '#1F2937',
@@ -1621,7 +1155,7 @@ const styles = StyleSheet.create({
   connectionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 4, // Reduced padding
     paddingHorizontal: 16,
     backgroundColor: '#F3F4F6',
   },
@@ -1636,7 +1170,7 @@ const styles = StyleSheet.create({
   darkConnectionText: {
     color: '#D1D5DB',
   },
-  // Messages List
+  // Messages List with more space
   messagesList: {
     flex: 1,
   },
@@ -1731,47 +1265,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 4,
   },
-  // Audio Message Styles
-  audioMessageContainer: {
-    alignItems: 'center',
-    minWidth: 200,
-  },
-  myAudioContainer: {
-    backgroundColor: 'transparent',
-  },
-  theirAudioContainer: {
-    backgroundColor: 'transparent',
-  },
-  audioPlayer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    marginBottom: 4,
-  },
-  audioWaveform: {
-    flex: 1,
-    height: 20,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 10,
-    marginHorizontal: 12,
-    overflow: 'hidden',
-  },
-  audioProgress: {
-    height: '100%',
-    borderRadius: 10,
-  },
-  audioDuration: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  myAudioText: {
-    color: '#FFFFFF',
-  },
-  theirAudioText: {
-    color: '#374151',
-  },
   fileInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1825,35 +1318,27 @@ const styles = StyleSheet.create({
   darkTypingText: {
     color: '#9CA3AF',
   },
-  // Input Container - Fixed at bottom
+  // Input Container with improved keyboard handling
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    alignItems: 'flex-end',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    gap: 6,
+    gap: 8,
   },
   darkInputContainer: {
     backgroundColor: '#1F2937',
     borderTopColor: '#374151',
   },
   attachmentButton: {
-    padding: 6,
+    padding: 8,
     borderRadius: 16,
     backgroundColor: '#F3F4F6',
   },
   darkAttachmentButton: {
-    backgroundColor: '#374151',
-  },
-  micButton: {
-    padding: 6,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F6',
-  },
-  darkMicButton: {
     backgroundColor: '#374151',
   },
   textInput: {
@@ -1862,11 +1347,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
     borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    maxHeight: 90,
-    fontSize: 14,
-    lineHeight: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    maxHeight: 100,
+    fontSize: 16,
+    lineHeight: 20,
   },
   darkTextInput: {
     backgroundColor: '#374151',
@@ -1874,11 +1359,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   sendButton: {
-    padding: 8,
+    padding: 10,
     borderRadius: 20,
     backgroundColor: '#3B82F6',
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1888,7 +1373,7 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     backgroundColor: '#E5E7EB',
   },
-  // Attachment Menu - Compact design
+  // Attachment Menu Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
@@ -1899,10 +1384,17 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
     padding: 16,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   darkAttachmentMenu: {
     backgroundColor: '#1F2937',
+  },
+  attachmentMenuTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+    color: '#374151',
   },
   attachmentOptions: {
     flexDirection: 'row',
@@ -1910,96 +1402,20 @@ const styles = StyleSheet.create({
   },
   attachmentOption: {
     alignItems: 'center',
-    padding: 12,
+    padding: 16,
   },
   attachmentIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
-  },
-  attachmentOptionText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#374151',
-  },
-  // Voice Recorder Styles
-  voiceRecorderContainer: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  darkVoiceRecorderContainer: {
-    backgroundColor: '#111827',
-  },
-  voiceRecorderHeader: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  voiceRecorderTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#374151',
     marginBottom: 8,
   },
-  recordingDuration: {
-    fontSize: 18,
+  attachmentOptionText: {
+    fontSize: 14,
     fontWeight: '500',
-    color: '#6B7280',
-  },
-  waveformContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 80,
-    marginBottom: 40,
-    paddingHorizontal: 20,
-  },
-  waveformBar: {
-    width: 3,
-    marginHorizontal: 1,
-    borderRadius: 1.5,
-  },
-  recordingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  recordingText: {
-    fontSize: 16,
     color: '#374151',
-  },
-  voiceRecorderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 40,
-  },
-  cancelRecordingButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-  },
-  cancelRecordingText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  stopRecordingButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#EF4444',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   // Image Selection Styles
   imageSelectionContainer: {

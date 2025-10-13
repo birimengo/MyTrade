@@ -9,14 +9,28 @@ const router = express.Router();
 // Upload file message to Cloudinary (supports images, documents, and audio)
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
+    console.log('📤 File upload request received:', {
+      conversationId: req.body.conversationId,
+      senderId: req.body.senderId,
+      duration: req.body.duration,
+      hasFile: !!req.file
+    });
+
     const { conversationId, senderId, duration } = req.body;
     
     if (!req.file) {
+      console.log('❌ No file uploaded');
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
       });
     }
+
+    console.log('📁 File details:', {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
 
     // Check if user is part of the conversation
     const conversation = await Conversation.findOne({
@@ -25,6 +39,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     });
 
     if (!conversation) {
+      console.log('❌ User not authorized for conversation:', { conversationId, senderId });
       return res.status(403).json({
         success: false,
         message: 'Not authorized to send messages in this conversation'
@@ -39,10 +54,31 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       messageType = 'audio';
     }
 
-    // Upload to Cloudinary
-    const result = await uploadToCloudinary(req.file.buffer, {
-      public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}`,
-      resource_type: messageType === 'audio' ? 'video' : 'auto'
+    console.log('📝 Detected message type:', messageType);
+
+    // Upload to Cloudinary with appropriate resource type
+    let cloudinaryOptions = {
+      public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}`
+    };
+
+    // Set resource type for Cloudinary
+    if (messageType === 'audio') {
+      cloudinaryOptions.resource_type = 'video'; // Cloudinary uses 'video' for audio files
+    } else if (messageType === 'image') {
+      cloudinaryOptions.resource_type = 'image';
+    } else {
+      cloudinaryOptions.resource_type = 'raw'; // For documents
+    }
+
+    console.log('☁️ Uploading to Cloudinary with options:', cloudinaryOptions);
+
+    const result = await uploadToCloudinary(req.file.buffer, cloudinaryOptions);
+
+    console.log('✅ Cloudinary upload result:', {
+      url: result.secure_url,
+      resource_type: result.resource_type,
+      format: result.format,
+      bytes: result.bytes
     });
 
     // Create message data
@@ -71,6 +107,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       messageData.content = `Sent a file: ${req.file.originalname}`;
     }
 
+    console.log('💾 Saving message to database:', {
+      type: messageData.type,
+      content: messageData.content,
+      duration: messageData.duration
+    });
+
     // Save message to database
     const message = await Message.create(messageData);
 
@@ -83,14 +125,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     // Populate sender info
     await message.populate('senderId', 'firstName lastName businessName');
 
+    console.log('✅ Message saved successfully:', message._id);
+
     res.json({
       success: true,
       message
     });
 
   } catch (error) {
-    console.error('Error uploading file to Cloudinary:', error);
+    console.error('❌ Error uploading file to Cloudinary:', error);
     
+    // Handle specific error cases
     if (error.message.includes('Video files are not allowed')) {
       return res.status(415).json({
         success: false,
@@ -98,16 +143,25 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       });
     }
     
-    if (error.message === 'File type not allowed') {
+    if (error.message.includes('File type not allowed')) {
       return res.status(415).json({
         success: false,
-        message: 'File type not supported. Please upload images, documents, or audio files only.'
+        message: error.message
+      });
+    }
+
+    if (error.message.includes('File too large')) {
+      return res.status(413).json({
+        success: false,
+        message: 'File size too large. Maximum size is 15MB.'
       });
     }
     
+    // Generic server error
     res.status(500).json({
       success: false,
-      message: 'Server error uploading file'
+      message: 'Server error uploading file',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

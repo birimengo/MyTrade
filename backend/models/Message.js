@@ -1,3 +1,4 @@
+// backend/models/Message.js
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
@@ -39,6 +40,10 @@ const messageSchema = new mongoose.Schema({
   cloudinaryPublicId: {
     type: String,
     default: ''
+  },
+  duration: {
+    type: Number,
+    default: 0
   },
   readBy: [{
     type: mongoose.Schema.Types.ObjectId,

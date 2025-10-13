@@ -2,14 +2,14 @@
 const express = require('express');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
-const { upload, uploadToCloudinary } = require('../config/cloudinary');
+const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 
 const router = express.Router();
 
-// Upload file message to Cloudinary
+// Upload file message to Cloudinary (supports images, documents, and audio)
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
-    const { conversationId, senderId } = req.body;
+    const { conversationId, senderId, duration } = req.body;
     
     if (!req.file) {
       return res.status(400).json({
@@ -35,11 +35,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     let messageType = 'document';
     if (req.file.mimetype.startsWith('image/')) {
       messageType = 'image';
+    } else if (req.file.mimetype.startsWith('audio/')) {
+      messageType = 'audio';
     }
 
     // Upload to Cloudinary
     const result = await uploadToCloudinary(req.file.buffer, {
-      public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}`
+      public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}`,
+      resource_type: messageType === 'audio' ? 'video' : 'auto'
     });
 
     // Create message data
@@ -54,9 +57,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       cloudinaryPublicId: result.public_id
     };
 
+    // Add duration for audio messages
+    if (messageType === 'audio' && duration) {
+      messageData.duration = parseFloat(duration);
+    }
+
     // Set appropriate content based on file type
     if (messageType === 'image') {
       messageData.content = `Sent an image: ${req.file.originalname}`;
+    } else if (messageType === 'audio') {
+      messageData.content = `Sent a voice message`;
     } else {
       messageData.content = `Sent a file: ${req.file.originalname}`;
     }
@@ -81,7 +91,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Error uploading file to Cloudinary:', error);
     
-    if (error.message.includes('Video and audio files are not allowed')) {
+    if (error.message.includes('Video files are not allowed')) {
       return res.status(415).json({
         success: false,
         message: error.message
@@ -91,7 +101,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     if (error.message === 'File type not allowed') {
       return res.status(415).json({
         success: false,
-        message: 'File type not supported. Please upload images or documents only.'
+        message: 'File type not supported. Please upload images, documents, or audio files only.'
       });
     }
     

@@ -43,14 +43,14 @@ try {
 // Use memory storage for multer
 const storage = multer.memoryStorage();
 
-// Updated file filter to allow only images and documents, but not videos or audio
+// Updated file filter to allow images, documents, and audio files
 const upload = multer({ 
   storage: storage,
   limits: {
     fileSize: 15 * 1024 * 1024, // 15MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Check file type - allow only images and documents, reject videos and audio
+    // Check file type - allow images, documents, and audio files
     const allowedTypes = [
       'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', // Images
       'application/pdf', // PDF documents
@@ -60,19 +60,19 @@ const upload = multer({
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // XLSX
       'text/plain', // Text files
       'application/zip', // ZIP archives
-      'application/x-rar-compressed' // RAR archives
+      'application/x-rar-compressed', // RAR archives
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg' // Audio files
     ];
     
-    // Explicitly reject video and audio files
+    // Explicitly reject video files only
     const rejectedTypes = [
-      'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-ms-wmv',
-      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a'
+      'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-ms-wmv'
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else if (rejectedTypes.includes(file.mimetype)) {
-      cb(new Error('Video and audio files are not allowed for file sharing. Please use voice messages for audio.'), false);
+      cb(new Error('Video files are not allowed. Please use voice messages for audio.'), false);
     } else {
       cb(new Error('File type not allowed'), false);
     }

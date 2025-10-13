@@ -50,47 +50,31 @@ const upload = multer({
     fileSize: 15 * 1024 * 1024, // 15MB limit
   },
   fileFilter: (req, file, cb) => {
-    console.log('📁 File upload attempt:', {
-      mimetype: file.mimetype,
-      originalname: file.originalname
-    });
-
     // Check file type - allow images, documents, and audio files
     const allowedTypes = [
-      // Images
-      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-      // Documents
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-      'application/zip',
-      'application/x-rar-compressed',
-      // Audio files - expanded list
-      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/mp4', 
-      'audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/x-wav', 'audio/flac',
-      'audio/x-ms-wma', 'audio/amr', 'audio/amr-wb',
-      // iOS audio files
-      'audio/m4a', 'audio/x-aac', 'audio/x-caf'
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', // Images
+      'application/pdf', // PDF documents
+      'application/msword', // DOC files
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+      'application/vnd.ms-excel', // XLS files
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // XLSX
+      'text/plain', // Text files
+      'application/zip', // ZIP archives
+      'application/x-rar-compressed', // RAR archives
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg' // Audio files
     ];
     
     // Explicitly reject video files only
     const rejectedTypes = [
-      'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 
-      'video/x-ms-wmv', 'video/webm', 'video/3gpp', 'video/avi'
+      'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-ms-wmv'
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
-      console.log('✅ File type allowed:', file.mimetype);
       cb(null, true);
     } else if (rejectedTypes.includes(file.mimetype)) {
-      console.log('❌ Video file rejected:', file.mimetype);
       cb(new Error('Video files are not allowed. Please use voice messages for audio.'), false);
     } else {
-      console.log('❌ File type not allowed:', file.mimetype);
-      cb(new Error(`File type '${file.mimetype}' is not supported. Please upload images, documents, or audio files only.`), false);
+      cb(new Error('File type not allowed'), false);
     }
   }
 });
@@ -101,21 +85,12 @@ const uploadToCloudinary = (buffer, options = {}) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: 'trade-uganda-chat',
-        resource_type: 'auto', // Let Cloudinary detect the resource type
+        resource_type: 'auto',
         ...options
       },
       (error, result) => {
-        if (error) {
-          console.error('❌ Cloudinary upload error:', error);
-          reject(error);
-        } else {
-          console.log('✅ Cloudinary upload successful:', {
-            resource_type: result.resource_type,
-            format: result.format,
-            bytes: result.bytes
-          });
-          resolve(result);
-        }
+        if (error) reject(error);
+        else resolve(result);
       }
     );
 

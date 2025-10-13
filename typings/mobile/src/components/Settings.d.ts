@@ -1,0 +1,2 @@
+
+declare interface newErrorsType {}

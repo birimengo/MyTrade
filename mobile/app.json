@@ -1,0 +1,35 @@
+{
+  "build": {
+    "preview": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "APP_ENV": "preview"
+      }
+    },
+    "preview2": {
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview3": {
+      "ios": {
+        "simulator": true
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "APP_ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

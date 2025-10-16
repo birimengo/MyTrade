@@ -75,7 +75,7 @@ const userSchema = new mongoose.Schema({
     default: ''
   },
   
-  // Transporter specific fields
+  // Transporter specific fields - FIXED: Remove enum validation for non-transporters
   plateNumber: {
     type: String,
     required: function() {
@@ -102,7 +102,7 @@ const userSchema = new mongoose.Schema({
   },
   vehicleType: {
     type: String,
-    enum: ['truck', 'motorcycle', 'van'],
+    // REMOVED: enum validation - will handle this in application logic
     required: function() {
       return this.role === 'transporter';
     },
@@ -135,8 +135,13 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  businessRegistration: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   
-  // Social media fields (stored as separate fields for simplicity)
+  // Social media fields
   facebook: {
     type: String,
     trim: true,
@@ -158,7 +163,7 @@ const userSchema = new mongoose.Schema({
     default: ''
   },
   
-  // Operating hours (simplified storage)
+  // Operating hours
   openingTime: {
     type: String,
     default: '08:00',
@@ -206,15 +211,15 @@ const userSchema = new mongoose.Schema({
   
   // Profile images and documents
   profileImage: {
-    type: String, // URL or file path
+    type: String,
     default: ''
   },
   businessLogo: {
-    type: String, // URL or file path
+    type: String,
     default: ''
   },
   idDocument: {
-    type: String, // URL or file path
+    type: String,
     default: ''
   },
   
@@ -235,7 +240,6 @@ const userSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  // Strict mode will ignore fields not defined in schema
   strict: true
 });
 

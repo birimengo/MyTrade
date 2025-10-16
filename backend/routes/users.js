@@ -129,7 +129,8 @@ router.get('/profile', protect, async (req, res) => {
             isOnline: user.isOnline,
             lastSeen: user.lastSeen,
             isVerified: user.isVerified,
-            createdAt: user.createdAt
+            createdAt: user.createdAt,
+            businessRegistration: user.businessRegistration || ''
         };
 
         // Add role-specific fields
@@ -176,7 +177,8 @@ router.put('/profile', protect, async (req, res) => {
             plateNumber,
             companyType,
             companyName,
-            vehicleType
+            vehicleType,
+            businessRegistration
         } = req.body;
 
         // Find the user
@@ -196,8 +198,9 @@ router.put('/profile', protect, async (req, res) => {
         if (address !== undefined) user.address = address;
         if (city !== undefined) user.city = city;
         if (country !== undefined) user.country = country;
+        if (businessRegistration !== undefined) user.businessRegistration = businessRegistration;
 
-        // Update role-specific fields
+        // Update role-specific fields - FIXED: Only update transporter fields for transporters
         if (user.role !== 'transporter') {
             if (businessName !== undefined) user.businessName = businessName;
             if (taxId !== undefined) user.taxId = taxId;
@@ -364,10 +367,17 @@ router.put('/:id', async (req, res) => {
             });
         }
 
-        // Apply updates
+        // Apply updates - FIXED: Only update transporter fields for transporters
         for (const key in updates) {
             if (updates.hasOwnProperty(key)) {
-                user[key] = updates[key];
+                // Only allow transporter fields to be updated if user is a transporter
+                if (['plateNumber', 'companyType', 'companyName', 'vehicleType'].includes(key)) {
+                    if (user.role === 'transporter') {
+                        user[key] = updates[key];
+                    }
+                } else {
+                    user[key] = updates[key];
+                }
             }
         }
 

@@ -43,13 +43,15 @@ const validateRoleSpecificFields = (req) => {
     }
     if (!vehicleType || vehicleType.trim() === '') {
       errors.push({ path: 'vehicleType', msg: 'Vehicle type is required for transporters' });
+    } else if (!['truck', 'motorcycle', 'van'].includes(vehicleType)) {
+      errors.push({ path: 'vehicleType', msg: 'Vehicle type must be one of: truck, motorcycle, van' });
     }
   }
 
   return errors;
 };
 
-// Register User - Enhanced version
+// Register User - Enhanced version with FIXED validation
 router.post('/register', registerValidationRules, async (req, res) => {
   try {
     console.log('📨 Received registration request body:', req.body);
@@ -100,7 +102,8 @@ router.post('/register', registerValidationRules, async (req, res) => {
       yearsInBusiness = '',
       deliveryRadius = '',
       termsAccepted = false,
-      marketingEmails = false
+      marketingEmails = false,
+      businessRegistration = ''
     } = req.body;
 
     // Check if user already exists
@@ -112,7 +115,7 @@ router.post('/register', registerValidationRules, async (req, res) => {
       });
     }
 
-    // Build user data object with proper defaults
+    // Build user data object with proper defaults - FIXED: Only include transporter fields for transporters
     const userData = {
       role: role.trim(),
       firstName: firstName.trim(),
@@ -125,37 +128,28 @@ router.post('/register', registerValidationRules, async (req, res) => {
       country: country.trim(),
       taxId: taxId.trim(),
       termsAccepted: Boolean(termsAccepted),
-      marketingEmails: Boolean(marketingEmails)
+      marketingEmails: Boolean(marketingEmails),
+      emergencyContact: emergencyContact.trim(),
+      website: website.trim(),
+      businessDescription: businessDescription.trim(),
+      yearsInBusiness: yearsInBusiness,
+      deliveryRadius: deliveryRadius,
+      businessRegistration: businessRegistration.trim()
     };
 
     // Add role-specific fields with proper validation
     if (role !== 'transporter') {
       userData.businessName = businessName ? businessName.trim() : '';
       userData.productCategory = productCategory ? productCategory.trim() : '';
+      // Don't include transporter fields for non-transporters
     } else {
+      // Only add transporter-specific fields for transporters
       userData.plateNumber = plateNumber ? plateNumber.trim() : '';
       userData.companyType = companyType;
       userData.vehicleType = vehicleType ? vehicleType.trim() : '';
       if (companyName && companyName.trim() !== '') {
         userData.companyName = companyName.trim();
       }
-    }
-
-    // Add optional fields only if they have values
-    if (emergencyContact && emergencyContact.trim() !== '') {
-      userData.emergencyContact = emergencyContact.trim();
-    }
-    if (website && website.trim() !== '') {
-      userData.website = website.trim();
-    }
-    if (businessDescription && businessDescription.trim() !== '') {
-      userData.businessDescription = businessDescription.trim();
-    }
-    if (yearsInBusiness && yearsInBusiness.trim() !== '') {
-      userData.yearsInBusiness = yearsInBusiness.trim();
-    }
-    if (deliveryRadius && deliveryRadius.trim() !== '') {
-      userData.deliveryRadius = deliveryRadius.trim();
     }
 
     console.log('✅ Processed user data for creation:', userData);
@@ -376,7 +370,8 @@ router.put('/profile', async (req, res) => {
       'companyName', 'vehicleType', 'emergencyContact', 'website', 
       'businessDescription', 'yearsInBusiness', 'deliveryRadius',
       'facebook', 'twitter', 'linkedin', 'instagram',
-      'openingTime', 'closingTime', 'workingDays', 'serviceAreas', 'paymentMethods'
+      'openingTime', 'closingTime', 'workingDays', 'serviceAreas', 'paymentMethods',
+      'businessRegistration'
     ];
 
     const updates = {};
@@ -390,9 +385,16 @@ router.put('/profile', async (req, res) => {
       }
     });
 
-    // Apply updates
+    // Apply updates - FIXED: Only update transporter fields for transporters
     Object.keys(updates).forEach(key => {
-      user[key] = updates[key];
+      // Only allow transporter fields to be updated if user is a transporter
+      if (['plateNumber', 'companyType', 'companyName', 'vehicleType'].includes(key)) {
+        if (user.role === 'transporter') {
+          user[key] = updates[key];
+        }
+      } else {
+        user[key] = updates[key];
+      }
     });
 
     await user.save();

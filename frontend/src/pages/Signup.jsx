@@ -452,6 +452,67 @@ const Signup = () => {
     setUploadProgress({});
   };
 
+  // Debug function to check form data
+  const debugFormData = () => {
+    console.log('=== FORM DATA DEBUG ===');
+    console.log('Role:', formData.role);
+    console.log('First Name:', formData.firstName);
+    console.log('Last Name:', formData.lastName);
+    console.log('Email:', formData.email);
+    console.log('Phone:', formData.phone);
+    console.log('Password:', formData.password ? '***' : 'empty');
+    console.log('Address:', formData.address);
+    console.log('City:', formData.city);
+    console.log('Business Name:', formData.businessName);
+    console.log('Product Category:', formData.productCategory);
+    console.log('Plate Number:', formData.plateNumber);
+    console.log('Vehicle Type:', formData.vehicleType);
+    console.log('=== END DEBUG ===');
+  };
+
+  // Test function for minimal registration
+  const testMinimalRegistration = async () => {
+    const testData = {
+      role: 'retailer',
+      firstName: 'Test',
+      lastName: 'User',
+      email: `test${Date.now()}@example.com`,
+      phone: '+256712345678',
+      password: 'password123',
+      businessName: 'Test Business',
+      address: 'Test Address 123',
+      city: 'Kampala',
+      country: 'Uganda',
+      productCategory: 'Electronics',
+      termsAccepted: true
+    };
+
+    console.log('🧪 Testing with minimal data:', testData);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(testData),
+      });
+      
+      const data = await response.json();
+      console.log('🧪 Test response:', data);
+      
+      if (response.ok) {
+        alert('✅ Test registration successful! Check console for details.');
+      } else {
+        alert(`❌ Test failed: ${data.message}`);
+      }
+    } catch (error) {
+      console.error('🧪 Test error:', error);
+      alert('❌ Test failed: ' + error.message);
+    }
+  };
+
+  // CORRECTED handleSubmit function using JSON instead of FormData
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -466,74 +527,61 @@ const Signup = () => {
     setErrors({});
     
     try {
-      // Prepare data for API call
+      // Debug: Check what's in formData
+      console.log('🔍 Current formData:', formData);
+      
+      // Prepare data for API call - USE JSON, NOT FormData
       const userData = {
-        role: formData.role,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
-        password: formData.password,
-        address: formData.address,
-        city: formData.city,
-        country: formData.country,
+        role: formData.role || preSelectedRole,
+        firstName: formData.firstName || '',
+        lastName: formData.lastName || '',
+        email: formData.email || '',
+        phone: formData.phone || '',
+        password: formData.password || '',
+        address: formData.address || '',
+        city: formData.city || '',
+        country: formData.country || 'Uganda',
         taxId: formData.taxId || '',
-        termsAccepted: formData.termsAccepted,
-        marketingEmails: formData.marketingEmails,
-        emergencyContact: formData.emergencyContact,
-        website: formData.website,
-        socialMedia: formData.socialMedia,
-        operatingHours: formData.operatingHours,
-        serviceAreas: formData.serviceAreas,
-        deliveryRadius: formData.deliveryRadius,
-        paymentMethods: formData.paymentMethods,
-        certifications: formData.certifications
+        termsAccepted: formData.termsAccepted || false,
+        marketingEmails: formData.marketingEmails || false,
+        emergencyContact: formData.emergencyContact || '',
+        website: formData.website || '',
+        businessDescription: formData.businessDescription || '',
+        yearsInBusiness: formData.yearsInBusiness || '',
+        deliveryRadius: formData.deliveryRadius || ''
       };
       
-      // Add role-specific fields
+      // Add role-specific required fields
       if (formData.role !== 'transporter') {
-        userData.businessName = formData.businessName;
-        userData.productCategory = formData.productCategory;
-        userData.businessDescription = formData.businessDescription;
-        userData.yearsInBusiness = formData.yearsInBusiness;
+        userData.businessName = formData.businessName || '';
+        userData.productCategory = formData.productCategory || '';
+        userData.businessRegistration = formData.businessRegistration || '';
       } else {
-        userData.plateNumber = formData.plateNumber;
-        userData.companyType = formData.companyType;
-        userData.companyName = formData.companyName || '';
-        userData.vehicleType = formData.vehicleType;
-        userData.businessDescription = formData.businessDescription;
-      }
-      
-      // Handle file uploads if any
-      const formDataToSend = new FormData();
-      Object.keys(userData).forEach(key => {
-        if (typeof userData[key] === 'object' && userData[key] !== null) {
-          formDataToSend.append(key, JSON.stringify(userData[key]));
-        } else {
-          formDataToSend.append(key, userData[key]);
+        userData.plateNumber = formData.plateNumber || '';
+        userData.companyType = formData.companyType || 'individual';
+        userData.vehicleType = formData.vehicleType || '';
+        if (formData.companyName) {
+          userData.companyName = formData.companyName;
         }
-      });
+      }
+
+      console.log('📤 Sending registration data to backend:', userData);
       
-      if (formData.profileImage) {
-        formDataToSend.append('profileImage', formData.profileImage);
-      }
-      if (formData.businessLogo) {
-        formDataToSend.append('businessLogo', formData.businessLogo);
-      }
-      if (formData.idDocument) {
-        formDataToSend.append('idDocument', formData.idDocument);
-      }
-      
-      // Make API call to register user
+      // Make API call to register user - USE JSON, NOT FormData
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
-        body: formDataToSend,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userData),
       });
       
       const data = await response.json();
+      console.log('📥 Server response:', data);
       
       if (!response.ok) {
         if (data.errors && Array.isArray(data.errors)) {
+          console.log('❌ Validation errors from server:', data.errors);
           const backendErrors = {};
           data.errors.forEach(error => {
             backendErrors[error.path] = error.msg;
@@ -541,11 +589,11 @@ const Signup = () => {
           setErrors(backendErrors);
           throw new Error('Please fix the validation errors');
         }
-        throw new Error(data.message || `Registration failed: ${response.status} ${response.statusText}`);
+        throw new Error(data.message || `Registration failed: ${response.status}`);
       }
       
       // Registration successful
-      console.log('Registration successful:', data);
+      console.log('✅ Registration successful:', data);
       
       // Reset form
       resetForm();
@@ -558,7 +606,7 @@ const Signup = () => {
         } 
       });
     } catch (error) {
-      console.error('Registration error:', error);
+      console.error('❌ Registration error:', error);
       
       let errorMessage = 'Registration failed. Please try again.';
       
@@ -1483,6 +1531,27 @@ const Signup = () => {
                 )}
               </div>
             )}
+
+            {/* Debug Tools Section */}
+            <div className="mt-4 p-4 border-t border-gray-200 bg-gray-50 rounded-md">
+              <p className="text-xs text-gray-600 mb-2 font-medium">Debug Tools:</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={debugFormData}
+                  className="px-3 py-1 bg-gray-500 text-white rounded text-xs"
+                >
+                  Debug Form Data
+                </button>
+                <button
+                  type="button"
+                  onClick={testMinimalRegistration}
+                  className="px-3 py-1 bg-green-600 text-white rounded text-xs"
+                >
+                  Test Registration
+                </button>
+              </div>
+            </div>
 
             {/* Enhanced Navigation Buttons */}
             <div className="flex flex-col sm:flex-row justify-between pt-4 border-t border-gray-200 space-y-2 sm:space-y-0">

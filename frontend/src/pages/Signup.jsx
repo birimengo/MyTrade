@@ -7,21 +7,28 @@ import {
   FaEye, FaEyeSlash, FaCheck, FaTimes, FaUpload, FaCamera
 } from 'react-icons/fa';
 
-// Dynamic API Base URL configuration
+// Dynamic API Base URL configuration - FIXED for browser environment
 const getApiBaseUrl = () => {
-  // Use environment variable if available
-  if (process.env.REACT_APP_API_URL) {
+  // Use environment variable if available (for Create React App)
+  if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) {
     return process.env.REACT_APP_API_URL;
+  }
+  
+  // Use import.meta.env for Vite
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
   }
   
   // Auto-detect based on current host
   const currentHost = window.location.hostname;
+  const currentProtocol = window.location.protocol;
   
   if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
     return 'http://localhost:5000';
   } else {
-    // For production, use relative path or your actual backend domain
-    return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`;
+    // For production, use the same host as the frontend (assuming backend is on same domain)
+    // If your backend is on a different subdomain, adjust this accordingly
+    return `${currentProtocol}//${currentHost}${window.location.port ? ':' + window.location.port : ''}`;
   }
 };
 
@@ -54,7 +61,6 @@ const Signup = () => {
     businessRegistration: '',
     yearsInBusiness: '',
     businessDescription: '',
-    // New fields for enhanced functionality
     profileImage: null,
     businessLogo: null,
     idDocument: null,
@@ -850,7 +856,7 @@ const Signup = () => {
         <div className="space-y-1">
           <div><strong>Frontend:</strong> {window.location.origin}</div>
           <div><strong>Backend API:</strong> {API_BASE_URL}</div>
-          <div><strong>Environment:</strong> {process.env.NODE_ENV}</div>
+          <div><strong>Environment:</strong> {window.location.hostname === 'localhost' ? 'Development' : 'Production'}</div>
         </div>
         <button
           onClick={checkBackendConnection}

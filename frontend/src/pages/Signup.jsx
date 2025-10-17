@@ -7,13 +7,31 @@ import {
   FaEye, FaEyeSlash, FaCheck, FaTimes, FaUpload, FaCamera
 } from 'react-icons/fa';
 
-// API base URL - use a relative path for API calls in production
-const API_BASE_URL = 'http://localhost:5000';
+// Dynamic API Base URL configuration
+const getApiBaseUrl = () => {
+  // Use environment variable if available
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // Auto-detect based on current host
+  const currentHost = window.location.hostname;
+  
+  if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+    return 'http://localhost:5000';
+  } else {
+    // For production, use relative path or your actual backend domain
+    return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`;
+  }
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 const Signup = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [preSelectedRole, setPreSelectedRole] = useState('');
+  const [backendStatus, setBackendStatus] = useState('checking');
   
   const [formData, setFormData] = useState({
     role: '',
@@ -184,6 +202,34 @@ const Signup = () => {
     { id: 'saturday', label: 'Sat' },
     { id: 'sunday', label: 'Sun' }
   ];
+
+  // Check backend connection on component mount
+  useEffect(() => {
+    checkBackendConnection();
+  }, []);
+
+  const checkBackendConnection = async () => {
+    try {
+      console.log('🔍 Checking backend connection to:', `${API_BASE_URL}/api/health`);
+      const response = await fetch(`${API_BASE_URL}/api/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        setBackendStatus('connected');
+        console.log('✅ Backend connection successful');
+      } else {
+        setBackendStatus('error');
+        console.warn('⚠️ Backend responded with error status:', response.status);
+      }
+    } catch (error) {
+      setBackendStatus('disconnected');
+      console.error('❌ Backend connection failed:', error);
+    }
+  };
 
   // Set the preselected role from navigation state
   useEffect(() => {
@@ -467,6 +513,8 @@ const Signup = () => {
     console.log('Product Category:', formData.productCategory);
     console.log('Plate Number:', formData.plateNumber);
     console.log('Vehicle Type:', formData.vehicleType);
+    console.log('API Base URL:', API_BASE_URL);
+    console.log('Backend Status:', backendStatus);
     console.log('=== END DEBUG ===');
   };
 
@@ -488,6 +536,7 @@ const Signup = () => {
     };
 
     console.log('🧪 Testing with minimal data:', testData);
+    console.log('🧪 Sending to:', `${API_BASE_URL}/api/auth/register`);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
@@ -512,7 +561,7 @@ const Signup = () => {
     }
   };
 
-  // CORRECTED handleSubmit function using JSON instead of FormData
+  // UPDATED handleSubmit function with better production handling
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -529,8 +578,9 @@ const Signup = () => {
     try {
       // Debug: Check what's in formData
       console.log('🔍 Current formData:', formData);
+      console.log('🚀 Sending to:', `${API_BASE_URL}/api/auth/register`);
       
-      // Prepare data for API call - USE JSON, NOT FormData
+      // Prepare data for API call
       const userData = {
         role: formData.role || preSelectedRole,
         firstName: formData.firstName || '',
@@ -565,17 +615,23 @@ const Signup = () => {
         }
       }
 
-      console.log('📤 Sending registration data to backend:', userData);
+      console.log('📤 Final registration data:', userData);
       
-      // Make API call to register user - USE JSON, NOT FormData
+      // Enhanced fetch with timeout and better error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(userData),
+        signal: controller.signal
       });
-      
+
+      clearTimeout(timeoutId);
+
       const data = await response.json();
       console.log('📥 Server response:', data);
       
@@ -610,10 +666,14 @@ const Signup = () => {
       
       let errorMessage = 'Registration failed. Please try again.';
       
-      if (error.message.includes('Failed to fetch')) {
-        errorMessage = 'Cannot connect to the server. Please check if the backend is running.';
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timeout. Please check your internet connection and try again.';
+      } else if (error.message.includes('Failed to fetch')) {
+        errorMessage = `Cannot connect to the server at ${API_BASE_URL}. Please check if the backend is running.`;
       } else if (error.message.includes('500')) {
         errorMessage = 'Server error. Please try again later or contact support.';
+      } else if (error.message.includes('Network Error')) {
+        errorMessage = 'Network error. Please check your internet connection.';
       } else {
         errorMessage = error.message || 'Registration failed. Please try again.';
       }
@@ -757,6 +817,51 @@ const Signup = () => {
     );
   };
 
+  // Connection Status Component
+  const ConnectionStatus = () => {
+    const getStatusColor = () => {
+      switch(backendStatus) {
+        case 'connected': return 'bg-green-500 text-white';
+        case 'checking': return 'bg-yellow-500 text-white';
+        case 'error': return 'bg-orange-500 text-white';
+        case 'disconnected': return 'bg-red-500 text-white';
+        default: return 'bg-gray-500 text-white';
+      }
+    };
+
+    const getStatusText = () => {
+      switch(backendStatus) {
+        case 'connected': return 'Connected to Backend';
+        case 'checking': return 'Checking Connection...';
+        case 'error': return 'Backend Error';
+        case 'disconnected': return 'Backend Unavailable';
+        default: return 'Unknown Status';
+      }
+    };
+
+    return (
+      <div className="bg-gray-100 p-3 rounded-md text-xs mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-medium">Connection Status:</span>
+          <span className={`px-2 py-1 rounded ${getStatusColor()}`}>
+            {getStatusText()}
+          </span>
+        </div>
+        <div className="space-y-1">
+          <div><strong>Frontend:</strong> {window.location.origin}</div>
+          <div><strong>Backend API:</strong> {API_BASE_URL}</div>
+          <div><strong>Environment:</strong> {process.env.NODE_ENV}</div>
+        </div>
+        <button
+          onClick={checkBackendConnection}
+          className="mt-2 px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
+        >
+          Re-check Connection
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 py-4 px-3 sm:px-4 lg:px-6">
       <div className="max-w-lg mx-auto">
@@ -807,6 +912,9 @@ const Signup = () => {
             </p>
           </div>
 
+          {/* Connection Status */}
+          <ConnectionStatus />
+
           {/* Server Connection Warning */}
           {API_BASE_URL.includes('localhost') && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4 rounded">
@@ -816,7 +924,23 @@ const Signup = () => {
                 </div>
                 <div className="ml-2">
                   <p className="text-xs text-yellow-700">
-                    <strong>Development Mode:</strong> Connecting to {API_BASE_URL}
+                    <strong>Development Mode:</strong> Using local backend at {API_BASE_URL}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Production Mode Indicator */}
+          {!API_BASE_URL.includes('localhost') && (
+            <div className="bg-green-50 border-l-4 border-green-400 p-3 mb-4 rounded">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <FaCheck className="h-4 w-4 text-green-400" />
+                </div>
+                <div className="ml-2">
+                  <p className="text-xs text-green-700">
+                    <strong>Production Mode:</strong> Connected to {API_BASE_URL}
                   </p>
                 </div>
               </div>
@@ -1526,6 +1650,8 @@ const Signup = () => {
                     <ul className="list-disc list-inside mt-0.5 space-y-0.5">
                       <li>Check if backend is running on {API_BASE_URL}</li>
                       <li>Verify server configuration</li>
+                      <li>Check CORS settings on backend</li>
+                      <li>Ensure database connection is working</li>
                     </ul>
                   </div>
                 )}
@@ -1539,16 +1665,23 @@ const Signup = () => {
                 <button
                   type="button"
                   onClick={debugFormData}
-                  className="px-3 py-1 bg-gray-500 text-white rounded text-xs"
+                  className="px-3 py-1 bg-gray-500 text-white rounded text-xs hover:bg-gray-600 transition-colors"
                 >
                   Debug Form Data
                 </button>
                 <button
                   type="button"
                   onClick={testMinimalRegistration}
-                  className="px-3 py-1 bg-green-600 text-white rounded text-xs"
+                  className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 transition-colors"
                 >
                   Test Registration
+                </button>
+                <button
+                  type="button"
+                  onClick={checkBackendConnection}
+                  className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
+                >
+                  Check Backend
                 </button>
               </div>
             </div>
@@ -1565,7 +1698,7 @@ const Signup = () => {
               
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || backendStatus === 'disconnected'}
                 className="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center text-xs font-medium shadow hover:shadow-md order-1 sm:order-2"
               >
                 {isLoading ? (

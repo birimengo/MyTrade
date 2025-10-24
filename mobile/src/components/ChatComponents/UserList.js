@@ -1,4 +1,3 @@
-// src/components/ChatComponents/UserList.js
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   View, 
@@ -52,7 +51,7 @@ const UserList = ({
       case 'supplier':
         return ['wholesaler', 'transporter'];
       case 'transporter':
-        return ['retailer', 'wholesaler', 'supplier'];
+        return ['retailer', 'wholesaler', 'supplier', 'transporter']; // Include all roles
       case 'admin':
         return ['retailer', 'wholesaler', 'supplier', 'transporter'];
       default:
@@ -143,8 +142,152 @@ const UserList = ({
     setLastMessages(messagesMap);
   };
 
+  // Enhanced supplier fetching with transporter-specific handling
+  const fetchSuppliers = async () => {
+    try {
+      // For transporters, use a different endpoint or approach
+      if (user?.role === 'transporter') {
+        console.log('Transporter fetching suppliers via communicable endpoint');
+        const response = await axios.get(`${API_BASE_URL}/api/users/communicable`, {
+          params: { userId: currentUserId },
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.data && response.data.success) {
+          const suppliers = response.data.users.filter(u => u.role === 'supplier') || [];
+          console.log(`Found ${suppliers.length} suppliers for transporter`);
+          return suppliers.map(supplier => ({
+            ...supplier,
+            role: 'supplier',
+            lastSeen: supplier.lastSeen || supplier.lastActive || supplier.updatedAt
+          }));
+        }
+        return [];
+      }
+
+      // If wholesaler has a product category, use the suppliers endpoint with category parameter
+      if (user?.role === 'wholesaler' && user?.productCategory) {
+        console.log(`Fetching suppliers with category: ${user.productCategory}`);
+        
+        const response = await axios.get(`${API_BASE_URL}/api/users/suppliers`, {
+          params: { category: user.productCategory },
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.data && response.data.success) {
+          const suppliers = response.data.suppliers || [];
+          console.log(`Found ${suppliers.length} suppliers with category ${user.productCategory}`);
+          
+          // Add category match flag
+          return suppliers.map(supplier => ({
+            ...supplier,
+            role: 'supplier',
+            isCategoryMatch: true,
+            lastSeen: supplier.lastSeen || supplier.lastActive || supplier.updatedAt
+          }));
+        }
+      }
+      
+      // Fallback: get all suppliers without category filter
+      console.log('Fetching all suppliers (no category filter)');
+      const response = await axios.get(`${API_BASE_URL}/api/users/suppliers`, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data && response.data.success) {
+        const suppliers = response.data.suppliers || [];
+        
+        // Add category match information
+        return suppliers.map(supplier => ({
+          ...supplier,
+          role: 'supplier',
+          isCategoryMatch: user?.productCategory ? supplier.productCategory === user.productCategory : false,
+          lastSeen: supplier.lastSeen || supplier.lastActive || supplier.updatedAt
+        }));
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Error fetching suppliers:', error);
+      
+      // For transporters, try communicable endpoint as fallback
+      if (user?.role === 'transporter') {
+        try {
+          console.log('Transporter fallback for suppliers');
+          const communicableResponse = await axios.get(`${API_BASE_URL}/api/users/communicable`, {
+            params: { userId: currentUserId },
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (communicableResponse.data?.success) {
+            const suppliers = communicableResponse.data.users.filter(u => u.role === 'supplier');
+            return suppliers.map(supplier => ({
+              ...supplier,
+              isCategoryMatch: false
+            }));
+          }
+        } catch (fallbackError) {
+          console.error('Transporter supplier fallback failed:', fallbackError);
+        }
+      }
+      
+      return [];
+    }
+  };
+
+  // Transporter-specific user fetching
+  const fetchUsersForTransporter = async (targetRole) => {
+    try {
+      console.log(`Transporter fetching ${targetRole}s via communicable endpoint`);
+      
+      const response = await axios.get(`${API_BASE_URL}/api/users/communicable`, {
+        params: { userId: currentUserId },
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data && response.data.success) {
+        const roleUsers = response.data.users.filter(u => u.role === targetRole) || [];
+        console.log(`Transporter found ${roleUsers.length} ${targetRole}s`);
+        
+        return roleUsers.map(userData => ({
+          ...userData,
+          role: userData.role || targetRole,
+          lastSeen: userData.lastSeen || userData.lastActive || userData.updatedAt
+        }));
+      }
+      
+      return [];
+    } catch (error) {
+      console.error(`Transporter error fetching ${targetRole}s:`, error);
+      return [];
+    }
+  };
+
   const fetchUsersByRole = async (targetRole) => {
     try {
+      // Special handling for transporters - use communicable endpoint for all roles
+      if (user?.role === 'transporter') {
+        return await fetchUsersForTransporter(targetRole);
+      }
+
+      // Special handling for suppliers to include category filtering
+      if (targetRole === 'supplier') {
+        return await fetchSuppliers();
+      }
+
+      // Standard endpoint mapping for other roles
       let endpoint = '';
       let dataKey = '';
       
@@ -161,12 +304,8 @@ const UserList = ({
           endpoint = '/api/transporters/active';
           dataKey = 'transporters';
           break;
-        case 'supplier':
-          endpoint = '/api/users/suppliers';
-          dataKey = 'users';
-          break;
         default:
-          endpoint = '/api/users';
+          endpoint = '/api/users/communicable';
           dataKey = 'users';
       }
 
@@ -182,15 +321,37 @@ const UserList = ({
       console.log(`API Response for ${targetRole}:`, response.data);
 
       if (response.data && response.data.success) {
-        if (response.data[dataKey]) return response.data[dataKey];
-        else if (response.data.users) return response.data.users;
-        else if (Array.isArray(response.data)) return response.data;
+        let usersData = [];
+        
+        if (response.data[dataKey]) {
+          usersData = response.data[dataKey];
+        } else if (response.data.users) {
+          usersData = response.data.users;
+        } else if (Array.isArray(response.data)) {
+          usersData = response.data;
+        }
+        
+        return usersData.map(userData => ({
+          ...userData,
+          role: userData.role || targetRole,
+          lastSeen: userData.lastSeen || userData.lastActive || userData.updatedAt
+        }));
       }
       
       return [];
     } catch (error) {
       console.error(`Error fetching ${targetRole}s:`, error);
-      // Return empty array instead of throwing to continue with other roles
+      
+      // For transporters, try communicable endpoint as fallback
+      if (user?.role === 'transporter') {
+        try {
+          console.log(`Transporter fallback for ${targetRole}`);
+          return await fetchUsersForTransporter(targetRole);
+        } catch (fallbackError) {
+          console.error(`Transporter fallback failed for ${targetRole}:`, fallbackError);
+        }
+      }
+      
       return [];
     }
   };
@@ -228,14 +389,7 @@ const UserList = ({
         try {
           const roleUsers = await fetchUsersByRole(targetRole);
           console.log(`Fetched ${roleUsers.length} ${targetRole}s`);
-          
-          const usersWithRole = roleUsers.map(userData => ({
-            ...userData,
-            role: userData.role || targetRole,
-            lastSeen: userData.lastSeen || userData.lastActive || userData.updatedAt
-          }));
-          
-          allUsers = [...allUsers, ...usersWithRole];
+          allUsers = [...allUsers, ...roleUsers];
         } catch (roleError) {
           console.warn(`Failed to fetch ${targetRole}s:`, roleError);
         }
@@ -407,16 +561,24 @@ const UserList = ({
     const isOnline = item.isOnline || 
                     (item.lastSeen && (new Date() - new Date(item.lastSeen)) < 5 * 60 * 1000); // Online if last seen < 5 min ago
     
+    const isCategoryMatch = item.isCategoryMatch || 
+                           (user?.role === 'wholesaler' && user?.productCategory && 
+                            item.role === 'supplier' && item.productCategory === user.productCategory);
+    
     return (
       <TouchableOpacity 
         style={[
           styles.userCard, 
-          isDarkMode && styles.darkUserCard
+          isDarkMode && styles.darkUserCard,
+          isCategoryMatch && styles.categoryMatchCard
         ]}
         onPress={() => onSelectUser(item)}
       >
         <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
+          <View style={[
+            styles.avatar,
+            isCategoryMatch && styles.categoryMatchAvatar
+          ]}>
             <Text style={styles.avatarText}>
               {getAvatarText(item)}
             </Text>
@@ -468,6 +630,12 @@ const UserList = ({
                 {lastMessage.isMyMessage ? 'You: ' : ''}
                 {truncateMessage(lastMessage.content)}
               </Text>
+              {isCategoryMatch && (
+                <View style={styles.categoryBadge}>
+                  <Ionicons name="checkmark-circle" size={12} color="#10B981" />
+                  <Text style={styles.categoryBadgeText}>Same Category</Text>
+                </View>
+              )}
             </View>
           ) : (
             <View style={styles.detailsRow}>
@@ -477,6 +645,14 @@ const UserList = ({
               ]} numberOfLines={1}>
                 {item.role}
               </Text>
+              
+              {isCategoryMatch && (
+                <View style={styles.categoryBadge}>
+                  <Ionicons name="checkmark-circle" size={12} color="#10B981" />
+                  <Text style={styles.categoryBadgeText}>Same Category</Text>
+                </View>
+              )}
+              
               {item.city && (
                 <Text style={[
                   styles.userLocation, 
@@ -547,6 +723,9 @@ const UserList = ({
           isDarkMode && styles.darkText
         ]}>
           Loading {role ? `${role}s` : 'users'}...
+          {user?.role === 'wholesaler' && user?.productCategory && (
+            <Text style={styles.categoryNote}>\nMatching suppliers in {user.productCategory}</Text>
+          )}
         </Text>
       </View>
     );
@@ -602,7 +781,9 @@ const UserList = ({
           ]}>
             {(searchQuery || localSearchQuery) 
               ? 'Try adjusting your search terms' 
-              : 'No users available to chat with at the moment'
+              : user?.role === 'wholesaler' && user?.productCategory 
+                ? `No ${role || 'suppliers'} available in ${user.productCategory} category`
+                : 'No users available to chat with at the moment'
             }
           </Text>
         </View>
@@ -673,6 +854,11 @@ const styles = StyleSheet.create({
     fontSize: isSmallDevice ? width * 0.036 : width * 0.04,
     color: '#374151',
     textAlign: 'center',
+  },
+  categoryNote: {
+    fontSize: isSmallDevice ? width * 0.03 : width * 0.032,
+    color: '#6B7280',
+    fontStyle: 'italic',
   },
   errorText: {
     marginTop: height * 0.015,
@@ -745,6 +931,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F2937',
     shadowOpacity: 0.15,
   },
+  categoryMatchCard: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#10B981',
+    backgroundColor: '#F0FDF4',
+  },
   avatarContainer: {
     position: 'relative',
     marginRight: width * 0.03,
@@ -756,6 +947,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#3B82F6',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  categoryMatchAvatar: {
+    backgroundColor: '#10B981',
   },
   avatarText: {
     color: '#FFFFFF',
@@ -834,6 +1028,21 @@ const styles = StyleSheet.create({
   userLocation: {
     fontSize: isSmallDevice ? width * 0.028 : width * 0.03,
     color: '#6B7280',
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: width * 0.015,
+    paddingVertical: height * 0.002,
+    borderRadius: width * 0.02,
+    marginLeft: width * 0.01,
+  },
+  categoryBadgeText: {
+    fontSize: isSmallDevice ? width * 0.025 : width * 0.027,
+    color: '#065F46',
+    fontWeight: '500',
+    marginLeft: width * 0.005,
   },
   darkText: {
     color: '#FFFFFF',

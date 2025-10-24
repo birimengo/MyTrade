@@ -11,15 +11,12 @@ import {
   Modal,
   Alert,
   ActivityIndicator,
-  Image,
   Platform,
   StatusBar,
   Switch,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
 import Svg, { 
   Path, Circle, Rect, Line 
 } from 'react-native-svg';
@@ -27,7 +24,10 @@ import Svg, {
 const { width, height } = Dimensions.get('window');
 const isSmallDevice = width < 375;
 
-// SVG Icons
+// API Configuration
+const API_BASE_URL = 'https://mytrade-cx5z.onrender.com'; // Your backend URL
+
+// SVG Icons (all existing SVG icons remain the same)
 const UserIcon = ({ color, size = 16 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -129,14 +129,6 @@ const CheckIcon = ({ color, size = 16 }) => (
   </Svg>
 );
 
-const UploadIcon = ({ color, size = 16 }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    <Path d="M17 8L12 3L7 8" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    <Path d="M12 3V15" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-  </Svg>
-);
-
 const ArrowLeftIcon = ({ color, size = 16 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M19 12H5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -183,28 +175,10 @@ const Signup = () => {
     businessRegistration: '',
     yearsInBusiness: '',
     businessDescription: '',
-    profileImage: null,
-    businessLogo: null,
-    idDocument: null,
     termsAccepted: false,
     marketingEmails: false,
     emergencyContact: '',
     website: '',
-    socialMedia: {
-      facebook: '',
-      twitter: '',
-      linkedin: '',
-      instagram: ''
-    },
-    operatingHours: {
-      opening: '08:00',
-      closing: '18:00',
-      workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
-    },
-    serviceAreas: [],
-    deliveryRadius: '',
-    paymentMethods: [],
-    certifications: []
   });
 
   const [errors, setErrors] = useState({});
@@ -214,30 +188,45 @@ const Signup = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState('');
-  const [uploadProgress, setUploadProgress] = useState({});
   const [availableCities, setAvailableCities] = useState([]);
+  const [debugInfo, setDebugInfo] = useState('');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showYearsModal, setShowYearsModal] = useState(false);
 
-  // Data structures
-  const productCategories = {
-    retailer: [
-      { name: 'Clothing & Fashion', subcategories: ['Men\'s Fashion', 'Women\'s Fashion', 'Children\'s Clothing', 'Shoes & Footwear', 'Accessories'] },
-      { name: 'Electronics', subcategories: ['Mobile Phones', 'Computers & Laptops', 'Home Appliances', 'Audio & Video', 'Gaming'] },
-      { name: 'Food & Beverages', subcategories: ['Groceries', 'Fresh Produce', 'Beverages', 'Snacks', 'Dairy Products'] },
-      { name: 'Home & Garden', subcategories: ['Furniture', 'Home Decor', 'Gardening Tools', 'Kitchenware', 'Bed & Bath'] },
-      { name: 'Health & Beauty', subcategories: ['Skincare', 'Haircare', 'Makeup', 'Personal Care', 'Vitamins & Supplements'] }
-    ],
-    wholesaler: [
-      { name: 'Clothing & Fashion', subcategories: ['Bulk Clothing', 'Textiles', 'Footwear Wholesale', 'Accessories Bulk'] },
-      { name: 'Electronics', subcategories: ['Electronics Bulk', 'Components', 'Gadgets Wholesale', 'Accessories'] },
-      { name: 'Food & Beverages', subcategories: ['Food Wholesale', 'Beverage Distribution', 'Fresh Produce Bulk', 'Packaged Foods'] },
-      { name: 'Home & Garden', subcategories: ['Furniture Wholesale', 'Home Goods Bulk', 'Building Materials', 'Garden Supplies'] }
-    ],
-    supplier: [
-      { name: 'Raw Materials', subcategories: ['Agricultural Products', 'Metals & Minerals', 'Chemicals', 'Textile Raw Materials'] },
-      { name: 'Manufactured Goods', subcategories: ['Electronic Components', 'Auto Parts', 'Machinery', 'Packaging Materials'] },
-      { name: 'Agricultural Products', subcategories: ['Grains & Cereals', 'Fresh Produce', 'Livestock', 'Dairy Products'] }
-    ]
-  };
+  // Updated Data structures with improved categories and years in business
+  const yearsInBusinessOptions = [
+    { value: 'less_than_1', label: 'Less than 1 year' },
+    { value: '1_2', label: '1 - 2 years' },
+    { value: '2_3', label: '2 - 3 years' },
+    { value: '3_5', label: '3 - 5 years' },
+    { value: 'more_than_5', label: 'More than 5 years' }
+  ];
+
+  // Unified product categories for all business roles
+  const productCategories = [
+    'Electronics',
+    'Electronics & Gadgets',
+    'Food & Groceries',
+    'Clothing & Fashion',
+    'Home & Kitchen',
+    'Health & Beauty',
+    'Sports & Outdoors',
+    'Books & Stationery',
+    'Automotive Parts',
+    'Baby & Kids Products',
+    'Jewelry & Accessories',
+    'Furniture & Decor',
+    'Pet Supplies',
+    'Office Supplies',
+    'Electrical Appliances',
+    'Building Materials',
+    'Agricultural Supplies',
+    'Pharmaceuticals',
+    'Industrial Equipment',
+    'Textiles & Fabrics',
+    'Beauty & Personal Care',
+    'Other'
+  ];
 
   const vehicleTypes = [
     { id: 'truck', label: 'Truck', description: 'Heavy goods transportation' },
@@ -250,24 +239,6 @@ const Signup = () => {
     { id: 'partnership', label: 'Partnership', description: 'Business partnership' },
     { id: 'company', label: 'Company', description: 'Registered company' },
     { id: 'cooperative', label: 'Cooperative', description: 'Business cooperative' }
-  ];
-
-  const paymentOptions = [
-    { id: 'cash', label: 'Cash' },
-    { id: 'mobile_money', label: 'Mobile Money' },
-    { id: 'bank_transfer', label: 'Bank Transfer' },
-    { id: 'credit_card', label: 'Credit Card' },
-    { id: 'debit_card', label: 'Debit Card' }
-  ];
-
-  const workingDaysOptions = [
-    { id: 'monday', label: 'Mon' },
-    { id: 'tuesday', label: 'Tue' },
-    { id: 'wednesday', label: 'Wed' },
-    { id: 'thursday', label: 'Thu' },
-    { id: 'friday', label: 'Fri' },
-    { id: 'saturday', label: 'Sat' },
-    { id: 'sunday', label: 'Sun' }
   ];
 
   // Set preselected role
@@ -328,82 +299,6 @@ const Signup = () => {
     }
   };
 
-  const handleNestedChange = (parent, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [parent]: {
-        ...prev[parent],
-        [field]: value
-      }
-    }));
-  };
-
-  const handleArrayChange = (field, value, checked) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: checked 
-        ? [...prev[field], value]
-        : prev[field].filter(item => item !== value)
-    }));
-  };
-
-  // File picker functions
-  const pickImage = async (field) => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled) {
-        setFormData(prev => ({
-          ...prev,
-          [field]: result.assets[0]
-        }));
-        
-        // Simulate upload progress
-        setUploadProgress(prev => ({ ...prev, [field]: 0 }));
-        simulateUploadProgress(field);
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
-  };
-
-  const pickDocument = async (field) => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
-      });
-
-      if (!result.canceled) {
-        setFormData(prev => ({
-          ...prev,
-          [field]: result.assets[0]
-        }));
-        
-        setUploadProgress(prev => ({ ...prev, [field]: 0 }));
-        simulateUploadProgress(field);
-      }
-    } catch (error) {
-      console.error('Error picking document:', error);
-    }
-  };
-
-  const simulateUploadProgress = (field) => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 10;
-      setUploadProgress(prev => ({ ...prev, [field]: progress }));
-      
-      if (progress >= 100) {
-        clearInterval(interval);
-      }
-    }, 100);
-  };
-
   const handleVehicleTypeSelect = (vehicleType) => {
     setFormData(prev => ({
       ...prev,
@@ -428,6 +323,36 @@ const Signup = () => {
       setFormData(prev => ({
         ...prev,
         companyName: ''
+      }));
+    }
+  };
+
+  const handleCategorySelect = (category) => {
+    setFormData(prev => ({
+      ...prev,
+      productCategory: category
+    }));
+    setShowCategoryModal(false);
+    
+    if (errors.productCategory) {
+      setErrors(prev => ({
+        ...prev,
+        productCategory: ''
+      }));
+    }
+  };
+
+  const handleYearsSelect = (years) => {
+    setFormData(prev => ({
+      ...prev,
+      yearsInBusiness: years
+    }));
+    setShowYearsModal(false);
+    
+    if (errors.yearsInBusiness) {
+      setErrors(prev => ({
+        ...prev,
+        yearsInBusiness: ''
       }));
     }
   };
@@ -492,6 +417,60 @@ const Signup = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
+  // Enhanced API call with debugging
+  const registerUser = async (userData) => {
+    try {
+      console.log('🔄 Starting registration process...');
+      console.log('📤 Sending data to:', `${API_BASE_URL}/api/auth/register`);
+      console.log('📦 Request payload:', JSON.stringify(userData, null, 2));
+
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(userData),
+      });
+
+      console.log('📨 Response status:', response.status);
+      console.log('📨 Response headers:', Object.fromEntries(response.headers.entries()));
+
+      const responseText = await response.text();
+      console.log('📨 Raw response:', responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse JSON response:', parseError);
+        throw new Error(`Server returned invalid JSON. Status: ${response.status}. Response: ${responseText}`);
+      }
+
+      console.log('📨 Parsed response data:', data);
+
+      if (!response.ok) {
+        // Handle validation errors from backend
+        if (data.errors && Array.isArray(data.errors)) {
+          const fieldErrors = {};
+          data.errors.forEach(error => {
+            if (error.path) {
+              fieldErrors[error.path] = error.msg || error.message;
+            }
+          });
+          setErrors(fieldErrors);
+          throw new Error('Please fix the validation errors above');
+        }
+        throw new Error(data.message || `Registration failed with status: ${response.status}`);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('❌ Registration API error:', error);
+      throw error;
+    }
+  };
+
   const handleSubmit = async () => {
     if (!validateStep(currentStep)) return;
     
@@ -502,20 +481,86 @@ const Signup = () => {
     
     setIsLoading(true);
     setErrors({});
-    
+    setDebugInfo('');
+
     try {
-      // Prepare and send data to API
-      // This would be your actual API call
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+      console.log('🚀 Starting final registration...');
       
+      // Prepare registration data - only send what backend expects
+      const registrationData = {
+        role: formData.role,
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        email: formData.email.trim().toLowerCase(),
+        phone: formData.phone.trim(),
+        password: formData.password,
+        address: formData.address.trim(),
+        city: formData.city.trim(),
+        country: formData.country,
+        termsAccepted: formData.termsAccepted,
+      };
+
+      // Add role-specific fields
+      if (formData.role !== 'transporter') {
+        registrationData.businessName = formData.businessName?.trim() || '';
+        registrationData.taxId = formData.taxId?.trim() || '';
+        registrationData.productCategory = formData.productCategory || '';
+        registrationData.businessRegistration = formData.businessRegistration?.trim() || '';
+        registrationData.yearsInBusiness = formData.yearsInBusiness || '';
+        registrationData.businessDescription = formData.businessDescription?.trim() || '';
+      } else {
+        registrationData.plateNumber = formData.plateNumber?.trim() || '';
+        registrationData.companyType = formData.companyType;
+        registrationData.vehicleType = formData.vehicleType || '';
+        if (formData.companyName && formData.companyName.trim() !== '') {
+          registrationData.companyName = formData.companyName.trim();
+        }
+      }
+
+      // Add optional fields
+      if (formData.emergencyContact?.trim()) {
+        registrationData.emergencyContact = formData.emergencyContact.trim();
+      }
+      if (formData.website?.trim()) {
+        registrationData.website = formData.website.trim();
+      }
+
+      console.log('📤 Final registration data:', registrationData);
+
+      // Call the API
+      const result = await registerUser(registrationData);
+
+      console.log('✅ Registration successful:', result);
+
       // Success - navigate to login
       navigation.navigate('Login', {
         message: 'Registration successful! Please log in.',
         registeredEmail: formData.email
       });
+      
     } catch (error) {
-      console.error('Registration error:', error);
-      setErrors({ submit: 'Registration failed. Please try again.' });
+      console.error('💥 Registration failed:', error);
+      setDebugInfo(`Error: ${error.message}`);
+      
+      if (error.message.includes('validation errors')) {
+        // Validation errors are already set in the state
+        setErrors(prev => ({
+          ...prev,
+          submit: 'Please fix the validation errors above'
+        }));
+      } else if (error.message.includes('User already exists')) {
+        setErrors({ 
+          submit: 'An account with this email already exists. Please use a different email or login.'
+        });
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        setErrors({ 
+          submit: 'Network error. Please check your internet connection and try again.'
+        });
+      } else {
+        setErrors({ 
+          submit: error.message || 'Registration failed. Please try again.' 
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -545,46 +590,6 @@ const Signup = () => {
       default: return "Registration";
     }
   };
-
-  // File Upload Component
-  const FileUpload = ({ label, field, type = 'image', currentFile, progress }) => (
-    <View style={styles.fileUploadContainer}>
-      <Text style={styles.fileUploadLabel}>{label}</Text>
-      <TouchableOpacity
-        style={[
-          styles.fileUploadArea,
-          currentFile && styles.fileUploadAreaSuccess,
-        ]}
-        onPress={() => type === 'image' ? pickImage(field) : pickDocument(field)}
-      >
-        {currentFile ? (
-          <View style={styles.fileUploadSuccess}>
-            <CheckIcon color="#10B981" size={20} />
-            <Text style={styles.fileUploadSuccessText} numberOfLines={1}>
-              {currentFile.name || 'File selected'}
-            </Text>
-            {progress !== undefined && progress < 100 && (
-              <View style={styles.progressBar}>
-                <View 
-                  style={[
-                    styles.progressFill,
-                    { width: `${progress}%` }
-                  ]} 
-                />
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={styles.fileUploadEmpty}>
-            <UploadIcon color="#9CA3AF" size={24} />
-            <Text style={styles.fileUploadEmptyText}>
-              Tap to {type === 'image' ? 'select image' : 'select document'}
-            </Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
 
   // Password Strength Indicator
   const PasswordStrengthIndicator = ({ strength }) => {
@@ -616,6 +621,59 @@ const Signup = () => {
     );
   };
 
+  // Selection Modal Component
+  const SelectionModal = ({ visible, title, items, selectedValue, onSelect, onClose }) => (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{title}</Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.modalCloseButton}
+            >
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalScrollView}>
+            {items.map((item, index) => {
+              const value = typeof item === 'string' ? item : item.value;
+              const label = typeof item === 'string' ? item : item.label;
+              const isSelected = selectedValue === value;
+              
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.modalItem,
+                    isSelected && styles.modalItemSelected
+                  ]}
+                  onPress={() => onSelect(value)}
+                >
+                  <Text style={[
+                    styles.modalItemText,
+                    isSelected && styles.modalItemTextSelected
+                  ]}>
+                    {label}
+                  </Text>
+                  {isSelected && (
+                    <CheckIcon color="#3B82F6" size={16} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
@@ -637,39 +695,46 @@ const Signup = () => {
           <Text style={styles.title}>Create Your Account</Text>
           <Text style={styles.subtitle}>Registering as {preSelectedRole}</Text>
           
-       {/* Progress Steps */}
-<View style={styles.progressContainer}>
-  <View style={styles.progressSteps}>
-    {[...Array(totalSteps)].map((_, i) => (
-      <View key={i} style={styles.stepContainer}>
-        <View style={[
-          styles.stepCircle,
-          currentStep > i + 1 && styles.stepCircleCompleted,
-          currentStep === i + 1 && styles.stepCircleActive,
-        ]}>
-          {currentStep > i + 1 ? (
-            <CheckIcon color="#FFFFFF" size={12} />
-          ) : (
-            <Text style={styles.stepNumber}>{i + 1}</Text>
-          )}
+          {/* Progress Steps */}
+          <View style={styles.progressContainer}>
+            <View style={styles.progressSteps}>
+              {[...Array(totalSteps)].map((_, i) => (
+                <View key={i} style={styles.stepContainer}>
+                  <View style={[
+                    styles.stepCircle,
+                    currentStep > i + 1 && styles.stepCircleCompleted,
+                    currentStep === i + 1 && styles.stepCircleActive,
+                  ]}>
+                    {currentStep > i + 1 ? (
+                      <CheckIcon color="#FFFFFF" size={12} />
+                    ) : (
+                      <Text style={styles.stepNumber}>{i + 1}</Text>
+                    )}
+                  </View>
+                  {i < totalSteps - 1 && (
+                    <View style={[
+                      styles.stepLine,
+                      currentStep > i + 1 && styles.stepLineCompleted
+                    ]} />
+                  )}
+                </View>
+              ))}
+            </View>
+            <View style={styles.stepLabels}>
+              <Text style={styles.stepLabel}>Personal</Text>
+              <Text style={styles.stepLabel}>Business</Text>
+              <Text style={styles.stepLabel}>Profile</Text>
+              <Text style={styles.stepLabel}>Security</Text>
+            </View>
+          </View>
         </View>
-        {i < totalSteps - 1 && (
-          <View style={[
-            styles.stepLine,
-            currentStep > i + 1 && styles.stepLineCompleted
-          ]} />
-        )}
-      </View>
-    ))}
-  </View>
-  <View style={styles.stepLabels}>
-    <Text style={styles.stepLabel}>Personal</Text>
-    <Text style={styles.stepLabel}>Business</Text>
-    <Text style={styles.stepLabel}>Profile</Text>
-    <Text style={styles.stepLabel}>Security</Text>
-  </View>
-</View>
-        </View>
+
+        {/* Debug Info - Only show in development */}
+        {__DEV__ && debugInfo ? (
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugText}>Debug: {debugInfo}</Text>
+          </View>
+        ) : null}
 
         {/* Form Container */}
         <View style={styles.formContainer}>
@@ -683,14 +748,6 @@ const Signup = () => {
           {/* Step 1: Personal Information */}
           {currentStep === 1 && (
             <View style={styles.stepContent}>
-              <FileUpload
-                label="Profile Photo (Optional)"
-                field="profileImage"
-                type="image"
-                currentFile={formData.profileImage}
-                progress={uploadProgress.profileImage}
-              />
-
               <View style={styles.row}>
                 <View style={styles.inputContainerHalf}>
                   <Text style={styles.label}>First Name *</Text>
@@ -823,14 +880,6 @@ const Signup = () => {
             <View style={styles.stepContent}>
               {preSelectedRole !== 'transporter' ? (
                 <>
-                  <FileUpload
-                    label="Business Logo (Optional)"
-                    field="businessLogo"
-                    type="image"
-                    currentFile={formData.businessLogo}
-                    progress={uploadProgress.businessLogo}
-                  />
-
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Business Name *</Text>
                     <View style={styles.inputWrapper}>
@@ -872,18 +921,24 @@ const Signup = () => {
                   {['retailer', 'wholesaler', 'supplier'].includes(preSelectedRole) && (
                     <View style={styles.inputContainer}>
                       <Text style={styles.label}>Product Category *</Text>
-                      <View style={styles.inputWrapper}>
-                        <BoxIcon color="#9CA3AF" size={16} />
-                        <TextInput
-                          style={[
-                            styles.input,
-                            errors.productCategory && styles.inputError
-                          ]}
-                          placeholder="Select product category"
-                          value={formData.productCategory}
-                          onChangeText={(value) => handleChange('productCategory', value)}
-                        />
-                      </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.selectorButton,
+                          errors.productCategory && styles.inputError
+                        ]}
+                        onPress={() => setShowCategoryModal(true)}
+                      >
+                        <View style={styles.selectorButtonContent}>
+                          <BoxIcon color="#9CA3AF" size={16} />
+                          <Text style={[
+                            styles.selectorButtonText,
+                            !formData.productCategory && styles.selectorButtonPlaceholder
+                          ]}>
+                            {formData.productCategory || 'Select product category'}
+                          </Text>
+                        </View>
+                        <ArrowRightIcon color="#9CA3AF" size={16} />
+                      </TouchableOpacity>
                       {errors.productCategory && (
                         <Text style={styles.errorText}>{errors.productCategory}</Text>
                       )}
@@ -1088,29 +1143,30 @@ const Signup = () => {
           {/* Step 3: Business Profile */}
           {currentStep === 3 && (
             <View style={styles.stepContent}>
-              <FileUpload
-                label="ID Document (Required for Verification)"
-                field="idDocument"
-                type="document"
-                currentFile={formData.idDocument}
-                progress={uploadProgress.idDocument}
-              />
-
               {preSelectedRole !== 'transporter' ? (
                 <>
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Years in Business *</Text>
-                    <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={[
-                          styles.input,
-                          errors.yearsInBusiness && styles.inputError
-                        ]}
-                        placeholder="Select years in business"
-                        value={formData.yearsInBusiness}
-                        onChangeText={(value) => handleChange('yearsInBusiness', value)}
-                      />
-                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.selectorButton,
+                        errors.yearsInBusiness && styles.inputError
+                      ]}
+                      onPress={() => setShowYearsModal(true)}
+                    >
+                      <View style={styles.selectorButtonContent}>
+                        <Text style={[
+                          styles.selectorButtonText,
+                          !formData.yearsInBusiness && styles.selectorButtonPlaceholder
+                        ]}>
+                          {formData.yearsInBusiness 
+                            ? yearsInBusinessOptions.find(opt => opt.value === formData.yearsInBusiness)?.label 
+                            : 'Select years in business'
+                          }
+                        </Text>
+                      </View>
+                      <ArrowRightIcon color="#9CA3AF" size={16} />
+                    </TouchableOpacity>
                     {errors.yearsInBusiness && (
                       <Text style={styles.errorText}>{errors.yearsInBusiness}</Text>
                     )}
@@ -1139,12 +1195,23 @@ const Signup = () => {
                 <>
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Years in Transport Business</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Select years in business"
-                      value={formData.yearsInBusiness}
-                      onChangeText={(value) => handleChange('yearsInBusiness', value)}
-                    />
+                    <TouchableOpacity
+                      style={styles.selectorButton}
+                      onPress={() => setShowYearsModal(true)}
+                    >
+                      <View style={styles.selectorButtonContent}>
+                        <Text style={[
+                          styles.selectorButtonText,
+                          !formData.yearsInBusiness && styles.selectorButtonPlaceholder
+                        ]}>
+                          {formData.yearsInBusiness 
+                            ? yearsInBusinessOptions.find(opt => opt.value === formData.yearsInBusiness)?.label 
+                            : 'Select years in business'
+                          }
+                        </Text>
+                      </View>
+                      <ArrowRightIcon color="#9CA3AF" size={16} />
+                    </TouchableOpacity>
                   </View>
 
                   <View style={styles.inputContainer}>
@@ -1157,17 +1224,6 @@ const Signup = () => {
                       multiline
                       numberOfLines={4}
                       textAlignVertical="top"
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Delivery Radius (km)</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Maximum delivery distance in kilometers"
-                      value={formData.deliveryRadius}
-                      onChangeText={(value) => handleChange('deliveryRadius', value)}
-                      keyboardType="numeric"
                     />
                   </View>
                 </>
@@ -1289,6 +1345,12 @@ const Signup = () => {
                     <Text style={styles.reviewValue}>{formData.businessName}</Text>
                   </View>
                 )}
+                {formData.productCategory && (
+                  <View style={styles.reviewItem}>
+                    <Text style={styles.reviewLabel}>Category:</Text>
+                    <Text style={styles.reviewValue}>{formData.productCategory}</Text>
+                  </View>
+                )}
                 {formData.city && (
                   <View style={styles.reviewItem}>
                     <Text style={styles.reviewLabel}>Location:</Text>
@@ -1362,6 +1424,26 @@ const Signup = () => {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Product Category Modal */}
+      <SelectionModal
+        visible={showCategoryModal}
+        title="Select Product Category"
+        items={productCategories}
+        selectedValue={formData.productCategory}
+        onSelect={handleCategorySelect}
+        onClose={() => setShowCategoryModal(false)}
+      />
+
+      {/* Years in Business Modal */}
+      <SelectionModal
+        visible={showYearsModal}
+        title="Select Years in Business"
+        items={yearsInBusinessOptions}
+        selectedValue={formData.yearsInBusiness}
+        onSelect={handleYearsSelect}
+        onClose={() => setShowYearsModal(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -1469,6 +1551,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flex: 1,
   },
+  debugContainer: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#92400E',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
   formContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -1495,58 +1590,6 @@ const styles = StyleSheet.create({
   },
   stepContent: {
     gap: 16,
-  },
-  fileUploadContainer: {
-    marginBottom: 8,
-  },
-  fileUploadLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  fileUploadArea: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fileUploadAreaSuccess: {
-    borderColor: '#10B981',
-    backgroundColor: '#ECFDF5',
-  },
-  fileUploadEmpty: {
-    alignItems: 'center',
-  },
-  fileUploadEmptyText: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 8,
-  },
-  fileUploadSuccess: {
-    alignItems: 'center',
-  },
-  fileUploadSuccessText: {
-    fontSize: 14,
-    color: '#065F46',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  progressBar: {
-    width: '100%',
-    height: 4,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 2,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#3B82F6',
-    borderRadius: 2,
   },
   row: {
     flexDirection: 'row',
@@ -1852,6 +1895,86 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     marginTop: 4,
+  },
+  // New styles for selector buttons
+  selectorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  selectorButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  selectorButtonText: {
+    fontSize: 14,
+    color: '#111827',
+    marginLeft: 12,
+  },
+  selectorButtonPlaceholder: {
+    color: '#9CA3AF',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalCloseText: {
+    fontSize: 18,
+    color: '#6B7280',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  modalItemSelected: {
+    backgroundColor: '#EFF6FF',
+  },
+  modalItemText: {
+    fontSize: 16,
+    color: '#374151',
+    flex: 1,
+  },
+  modalItemTextSelected: {
+    color: '#1E40AF',
+    fontWeight: '500',
   },
 });
 

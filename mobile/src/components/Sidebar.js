@@ -48,11 +48,19 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
 
     const iconProps = { size, color };
 
+    // Comprehensive icon mapping for all roles
     switch (iconName) {
+      // Common icons
       case 'home':
         return <Ionicons name="home-outline" {...iconProps} />;
       case 'cog':
         return <Ionicons name="settings-outline" {...iconProps} />;
+      case 'comments':
+        return <FontAwesome5 name="comments" {...iconProps} />;
+      case 'chatbubbles':
+        return <Ionicons name="chatbubble-ellipses-outline" {...iconProps} />;
+      
+      // Retailer/Wholesaler icons
       case 'shopping-cart':
         return <FontAwesome5 name="shopping-cart" {...iconProps} />;
       case 'box-open':
@@ -63,8 +71,26 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
         return <FontAwesome5 name="dollar-sign" {...iconProps} />;
       case 'file-invoice':
         return <FontAwesome5 name="file-invoice" {...iconProps} />;
-      case 'comments':
-        return <FontAwesome5 name="comments" {...iconProps} />;
+      case 'chart-pie':
+        return <FontAwesome5 name="chart-pie" {...iconProps} />;
+      
+      // Transporter icons
+      case 'map-marker-alt':
+        return <FontAwesome5 name="map-marker-alt" {...iconProps} />;
+      case 'truck':
+        return <FontAwesome5 name="truck" {...iconProps} />;
+      case 'car':
+        return <FontAwesome5 name="car" {...iconProps} />;
+      case 'route':
+        return <FontAwesome5 name="route" {...iconProps} />;
+      case 'calendar':
+        return <FontAwesome5 name="calendar" {...iconProps} />;
+      case 'clipboard':
+        return <FontAwesome5 name="clipboard" {...iconProps} />;
+      case 'cube':
+        return <FontAwesome5 name="cube" {...iconProps} />;
+      
+      // UI icons
       case 'sun':
         return <Feather name="sun" {...iconProps} />;
       case 'moon':
@@ -73,8 +99,10 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
         return <MaterialIcons name="logout" {...iconProps} />;
       case 'times':
         return <Ionicons name="close" {...iconProps} />;
+      
+      // Fallback icon
       default:
-        return <View style={{ width: size, height: size }} />;
+        return <Ionicons name="help-circle-outline" {...iconProps} />;
     }
   };
 
@@ -102,6 +130,28 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
       </TouchableOpacity>
     );
   };
+
+  // Get role-specific section title
+  const getRoleSectionTitle = () => {
+    const role = user?.role?.toLowerCase();
+    const roleTitles = {
+      retailer: 'Retailer',
+      wholesaler: 'Wholesaler', 
+      supplier: 'Supplier',
+      transporter: 'Transporter',
+      admin: 'Admin'
+    };
+    return roleTitles[role] || 'Business';
+  };
+
+  // Filter out duplicates between common items and role-specific items
+  const getFilteredRoleItems = () => {
+    const commonIds = commonItems.map(item => item.id);
+    return roleSpecificItems.items.filter(item => !commonIds.includes(item.id));
+  };
+
+  const filteredRoleItems = getFilteredRoleItems();
+  const roleSectionTitle = getRoleSectionTitle();
 
   return (
     <>
@@ -134,9 +184,9 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
 
           <View style={styles.navSection}>
             <Text style={[styles.sectionLabel, isDarkMode && styles.darkSectionLabel]}>
-              Retailer
+              {roleSectionTitle}
             </Text>
-            {roleSpecificItems.items.map(renderNavItem)}
+            {filteredRoleItems.map(renderNavItem)}
           </View>
         </ScrollView>
 
@@ -157,7 +207,7 @@ const Sidebar = ({ activeTab, setActiveTab, roleSpecificItems, isOpen, onClose }
             style={[styles.footerButton, styles.logoutButton]}
           >
             {getIconComponent('sign-out-alt', 16, false)}
-            <Text style={styles.logoutText}><Text style={styles.logoutText}>Logout</Text></Text>
+            <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -297,4 +347,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Sidebar;
+export default Sidebar; 

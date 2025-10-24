@@ -928,84 +928,112 @@ const MyStock = () => {
     });
   };
 
-  // Loading State
-  if (loading && activeTab === 'stock') {
+  // NEW: Mobile Product Card Component
+  const renderProductCard = (product) => {
+    const stockStatus = getStockStatus(product.quantity, product.lowStockThreshold);
+    const profitInfo = calculateProductProfit(product);
+
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-2">
-        <div className="animate-pulse">
-          <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-3"></div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="h-14 bg-gray-200 dark:bg-gray-700 rounded-lg"></div>
-            ))}
+      <div key={product._id} className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-3 mb-3">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-2">
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-900 dark:text-white text-[13px] truncate">{product.name}</h3>
+            <p className="text-gray-500 dark:text-gray-400 text-[11px]">{product.sku || 'No SKU'}</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3">
-            <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
+          <span className={`inline-flex px-2 py-1 rounded text-[10px] font-semibold ${getStockStatusColor(stockStatus)}`}>
+            {getStockStatusText(stockStatus)}
+          </span>
+        </div>
+
+        {/* Category */}
+        <div className="mb-2">
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+            {product.category}
+          </span>
+        </div>
+
+        {/* Stock Info */}
+        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Stock Quantity</p>
+            <p className="font-semibold text-gray-900 dark:text-white">
+              {product.quantity} {product.measurementUnit}
+            </p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Low Stock Alert</p>
+            <p className="font-semibold text-gray-900 dark:text-white">
+              {product.lowStockThreshold || 10}
+            </p>
+          </div>
+        </div>
+
+        {/* Pricing */}
+        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Selling Price</p>
+            <p className="font-semibold text-gray-900 dark:text-white">
+              ${product.sellingPrice?.toFixed(2)}
+            </p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Cost</p>
+            <p className="font-semibold text-gray-900 dark:text-white">
+              ${product.productionPrice?.toFixed(2)}
+            </p>
+          </div>
+        </div>
+
+        {/* Profit */}
+        <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-2 mb-3">
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div>
+              <p className="text-gray-500 dark:text-gray-400">Profit/Unit</p>
+              <p className={`font-semibold ${getProfitColor(profitInfo.profitPerUnit)}`}>
+                ${profitInfo.profitPerUnit.toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500 dark:text-gray-400">Total Profit</p>
+              <p className={`font-semibold ${getProfitColor(profitInfo.totalPotentialProfit)}`}>
+                ${profitInfo.totalPotentialProfit.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-600">
+          <button
+            onClick={() => viewProductDetails(product)}
+            className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-[11px] font-medium flex items-center gap-1"
+          >
+            <FaEye className="text-[10px]" />
+            Details
+          </button>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => handleManualStockUpdate(product._id, product.quantity + 1)}
+              className="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 p-1 rounded hover:bg-green-50 dark:hover:bg-green-900/30"
+              title="Add Stock"
+            >
+              <FaPlus className="text-[10px]" />
+            </button>
+            <button
+              onClick={() => handleDeleteProduct(product._id)}
+              className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"
+              title="Delete Product"
+            >
+              <FaTrash className="text-[10px]" />
+            </button>
           </div>
         </div>
       </div>
     );
-  }
+  };
 
-  // Statistics Cards
-  const renderStatisticsCards = () => (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center">
-          <div className="p-1.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-            <FaWarehouse className="text-blue-600 dark:text-blue-400 text-xs" />
-          </div>
-          <div className="ml-2">
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Stock Value</p>
-            <p className="text-xs font-bold dark:text-white">${statistics.totalStockValue.toLocaleString()}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center">
-          <div className="p-1.5 bg-green-50 dark:bg-green-900/30 rounded-lg">
-            <FaMoneyBillAlt className="text-green-600 dark:text-green-400 text-xs" />
-          </div>
-          <div className="ml-2">
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Sales</p>
-            <p className="text-xs font-bold dark:text-white">${salesStatistics.totalSales.toLocaleString()}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center">
-          <div className="p-1.5 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
-            <FaChartLine className="text-purple-600 dark:text-purple-400 text-xs" />
-          </div>
-          <div className="ml-2">
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Profit</p>
-            <p className={`text-xs font-bold ${getProfitColor(salesStatistics.totalProfit)}`}>
-              ${salesStatistics.totalProfit.toLocaleString()}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center">
-          <div className="p-1.5 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
-            <FaBox className="text-orange-600 dark:text-orange-400 text-xs" />
-          </div>
-          <div className="ml-2">
-            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Stock Status</p>
-            <p className="text-xs font-bold dark:text-white">{statistics.totalItemsInStock} Items</p>
-            <p className="text-[10px] text-gray-400">
-              {statistics.inStockCount} In Stock, {statistics.lowStockCount} Low, {statistics.outOfStockCount} Out
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Product Row
+  // Product Row for Table (Wide screens)
   const renderProductRow = (product) => {
     const stockStatus = getStockStatus(product.quantity, product.lowStockThreshold);
     const profitInfo = calculateProductProfit(product);
@@ -1082,6 +1110,83 @@ const MyStock = () => {
       </tr>
     );
   };
+
+  // Loading State
+  if (loading && activeTab === 'stock') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-2">
+        <div className="animate-pulse">
+          <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-3"></div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="h-14 bg-gray-200 dark:bg-gray-700 rounded-lg"></div>
+            ))}
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3">
+            <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Statistics Cards
+  const renderStatisticsCards = () => (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
+        <div className="flex items-center">
+          <div className="p-1.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+            <FaWarehouse className="text-blue-600 dark:text-blue-400 text-xs" />
+          </div>
+          <div className="ml-2">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Stock Value</p>
+            <p className="text-xs font-bold dark:text-white">${statistics.totalStockValue.toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
+        <div className="flex items-center">
+          <div className="p-1.5 bg-green-50 dark:bg-green-900/30 rounded-lg">
+            <FaMoneyBillAlt className="text-green-600 dark:text-green-400 text-xs" />
+          </div>
+          <div className="ml-2">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Sales</p>
+            <p className="text-xs font-bold dark:text-white">${salesStatistics.totalSales.toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
+        <div className="flex items-center">
+          <div className="p-1.5 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
+            <FaChartLine className="text-purple-600 dark:text-purple-400 text-xs" />
+          </div>
+          <div className="ml-2">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Profit</p>
+            <p className={`text-xs font-bold ${getProfitColor(salesStatistics.totalProfit)}`}>
+              ${salesStatistics.totalProfit.toLocaleString()}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-2 border border-gray-100 dark:border-gray-700">
+        <div className="flex items-center">
+          <div className="p-1.5 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
+            <FaBox className="text-orange-600 dark:text-orange-400 text-xs" />
+          </div>
+          <div className="ml-2">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">Stock Status</p>
+            <p className="text-xs font-bold dark:text-white">{statistics.totalItemsInStock} Items</p>
+            <p className="text-[10px] text-gray-400">
+              {statistics.inStockCount} In Stock, {statistics.lowStockCount} Low, {statistics.outOfStockCount} Out
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   // UPDATED: Sale Card Component with receipt status
   const renderSaleCard = (sale) => {
@@ -2514,71 +2619,94 @@ const MyStock = () => {
               </div>
             </div>
 
+            {/* UPDATED: Mobile Cards and Desktop Table */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border border-gray-100 dark:border-gray-700 h-full flex flex-col">
               <div className="flex-1 overflow-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0">
-                    <tr>
-                      <th 
-                        className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
-                        onClick={() => handleSort('name')}
-                      >
-                        <div className="flex items-center gap-1">
-                          Product
-                          {getSortIcon('name')}
-                        </div>
-                      </th>
-                      <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Category
-                      </th>
-                      <th 
-                        className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
-                        onClick={() => handleSort('quantity')}
-                      >
-                        <div className="flex items-center gap-1">
-                          Stock Qty
-                          {getSortIcon('quantity')}
-                        </div>
-                      </th>
-                      <th 
-                        className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
-                        onClick={() => handleSort('sellingPrice')}
-                      >
-                        <div className="flex items-center gap-1">
-                          Price
-                          {getSortIcon('sellingPrice')}
-                        </div>
-                      </th>
-                      <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Cost
-                      </th>
-                      <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Profit
-                      </th>
-                      <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Stock Status
-                      </th>
-                      <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredProducts.map(renderProductRow)}
-                  </tbody>
-                </table>
-                
-                {filteredProducts.length === 0 && (
-                  <div className="text-center py-8">
-                    <FaBox className="mx-auto text-2xl text-gray-400 mb-2" />
-                    <p className="text-gray-500 dark:text-gray-400 text-[11px]">No stock items found</p>
-                    {(searchTerm || filterCategory !== 'all' || filterStatus !== 'all' || showLowStockOnly) && (
-                      <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1">
-                        Try adjusting your search or filters
-                      </p>
-                    )}
-                  </div>
-                )}
+                {/* Mobile Cards - visible on small screens only */}
+                <div className="block md:hidden">
+                  {filteredProducts.length > 0 ? (
+                    <div className="p-2">
+                      {filteredProducts.map(renderProductCard)}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <FaBox className="mx-auto text-2xl text-gray-400 mb-2" />
+                      <p className="text-gray-500 dark:text-gray-400 text-[11px]">No stock items found</p>
+                      {(searchTerm || filterCategory !== 'all' || filterStatus !== 'all' || showLowStockOnly) && (
+                        <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1">
+                          Try adjusting your search or filters
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Desktop Table - visible on medium screens and up */}
+                <div className="hidden md:block">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0">
+                      <tr>
+                        <th 
+                          className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                          onClick={() => handleSort('name')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Product
+                            {getSortIcon('name')}
+                          </div>
+                        </th>
+                        <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Category
+                        </th>
+                        <th 
+                          className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                          onClick={() => handleSort('quantity')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Stock Qty
+                            {getSortIcon('quantity')}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600"
+                          onClick={() => handleSort('sellingPrice')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Price
+                            {getSortIcon('sellingPrice')}
+                          </div>
+                        </th>
+                        <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Cost
+                        </th>
+                        <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Profit
+                        </th>
+                        <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Stock Status
+                        </th>
+                        <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      {filteredProducts.map(renderProductRow)}
+                    </tbody>
+                  </table>
+                  
+                  {filteredProducts.length === 0 && (
+                    <div className="text-center py-8">
+                      <FaBox className="mx-auto text-2xl text-gray-400 mb-2" />
+                      <p className="text-gray-500 dark:text-gray-400 text-[11px]">No stock items found</p>
+                      {(searchTerm || filterCategory !== 'all' || filterStatus !== 'all' || showLowStockOnly) && (
+                        <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1">
+                          Try adjusting your search or filters
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </>

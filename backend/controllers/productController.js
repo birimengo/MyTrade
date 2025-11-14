@@ -186,6 +186,7 @@ exports.createProduct = async (req, res) => {
       ...req.body,
       wholesaler: req.user.id,
       price: parseFloat(req.body.price),
+      costPrice: parseFloat(req.body.costPrice), // ADDED: Cost price field
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -195,13 +196,26 @@ exports.createProduct = async (req, res) => {
       fromCertifiedOrder: false // Ensure manually created products are not marked as certified
     };
 
+    // Validate that cost price is less than selling price
+    if (productData.costPrice >= productData.price) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cost price must be less than selling price'
+      });
+    }
+
     const product = new Product(productData);
     await product.save();
 
     res.status(201).json({
       success: true,
       message: 'Product created successfully',
-      product
+      product: {
+        ...product.toObject(),
+        profitMargin: product.profitMargin,
+        profitPerUnit: product.profitPerUnit,
+        totalProfitPotential: product.totalProfitPotential
+      }
     });
   } catch (error) {
     res.status(400).json({
@@ -242,6 +256,7 @@ exports.updateProduct = async (req, res) => {
     const updateData = {
       ...req.body,
       price: parseFloat(req.body.price),
+      costPrice: parseFloat(req.body.costPrice), // ADDED: Cost price field
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -249,6 +264,14 @@ exports.updateProduct = async (req, res) => {
       tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls
     };
+
+    // Validate that cost price is less than selling price
+    if (updateData.costPrice >= updateData.price) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cost price must be less than selling price'
+      });
+    }
 
     // Prevent updating certified order source for manually created products
     if (!product.fromCertifiedOrder) {
@@ -265,7 +288,12 @@ exports.updateProduct = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
-      product
+      product: {
+        ...product.toObject(),
+        profitMargin: product.profitMargin,
+        profitPerUnit: product.profitPerUnit,
+        totalProfitPotential: product.totalProfitPotential
+      }
     });
   } catch (error) {
     res.status(400).json({
@@ -376,6 +404,59 @@ exports.deleteProductImage = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error deleting image',
+      error: error.message
+    });
+  }
+};
+
+// Get profit analytics for wholesaler
+exports.getProfitAnalytics = async (req, res) => {
+  try {
+    const products = await Product.find({
+      wholesaler: req.user.id,
+      isActive: true
+    });
+
+    const analytics = {
+      totalProducts: products.length,
+      totalInvestment: 0,
+      totalPotentialRevenue: 0,
+      totalPotentialProfit: 0,
+      averageProfitMargin: 0,
+      lowStockProducts: 0,
+      outOfStockProducts: 0
+    };
+
+    products.forEach(product => {
+      const investment = product.costPrice * product.quantity;
+      const potentialRevenue = product.price * product.quantity;
+      const potentialProfit = potentialRevenue - investment;
+
+      analytics.totalInvestment += investment;
+      analytics.totalPotentialRevenue += potentialRevenue;
+      analytics.totalPotentialProfit += potentialProfit;
+
+      if (product.lowStockAlert) {
+        analytics.lowStockProducts++;
+      }
+
+      if (product.quantity === 0) {
+        analytics.outOfStockProducts++;
+      }
+    });
+
+    if (products.length > 0) {
+      analytics.averageProfitMargin = (analytics.totalPotentialProfit / analytics.totalInvestment) * 100;
+    }
+
+    res.status(200).json({
+      success: true,
+      analytics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profit analytics',
       error: error.message
     });
   }

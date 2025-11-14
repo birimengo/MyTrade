@@ -1,4 +1,4 @@
-// models/Product.js - UPDATED VERSION
+// models/Product.js
 const mongoose = require('mongoose');
 
 // Add this image schema definition
@@ -38,19 +38,7 @@ const productSchema = new mongoose.Schema({
     required: true,
     maxlength: 1000
   },
-  // REMOVED: Old price field
-  // price: {
-  //   type: Number,
-  //   required: true,
-  //   min: 0
-  // },
-  // ADDED: New price fields
-  sellingPrice: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  purchasingPrice: {
+  price: {
     type: Number,
     required: true,
     min: 0
@@ -63,6 +51,7 @@ const productSchema = new mongoose.Schema({
   measurementUnit: {
     type: String,
     required: true,
+    //enum: ['units', 'kg', 'g', 'l', 'ml', 'pack', 'box', 'carton', 'dozen'],
     default: 'units'
   },
   category: {
@@ -157,19 +146,6 @@ productSchema.pre('save', async function(next) {
   next();
 });
 
-// Virtual for profit margin calculation
-productSchema.virtual('profitMargin').get(function() {
-  if (this.purchasingPrice > 0) {
-    return ((this.sellingPrice - this.purchasingPrice) / this.purchasingPrice) * 100;
-  }
-  return 0;
-});
-
-// Virtual for profit per unit
-productSchema.virtual('profitPerUnit').get(function() {
-  return this.sellingPrice - this.purchasingPrice;
-});
-
 // Method to check low stock
 productSchema.methods.checkLowStock = function() {
   if (this.originalStockQuantity && this.originalStockQuantity > 0) {
@@ -201,17 +177,13 @@ productSchema.pre('save', function(next) {
   next();
 });
 
-// Ensure virtual fields are included in JSON output
-productSchema.set('toJSON', { virtuals: true });
-productSchema.set('toObject', { virtuals: true });
-
 // Indexes for better query performance
 productSchema.index({ wholesaler: 1, category: 1 });
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
 productSchema.index({ sku: 1 }, { unique: true, sparse: true });
 productSchema.index({ lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, lowStockAlert: 1 });
-productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
-productSchema.index({ isActive: 1 });
+productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 }); // New index for certified products
+productSchema.index({ isActive: 1 }); // New index for active products
 
 module.exports = mongoose.model('Product', productSchema);

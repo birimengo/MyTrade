@@ -1,4 +1,4 @@
-// controllers/productController.js - UPDATED VERSION
+// controllers/productController.js
 const Product = require('../models/Product');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
@@ -167,7 +167,7 @@ exports.getProduct = async (req, res) => {
   }
 };
 
-// Create new product - UPDATED: Handle both old and new price fields
+// Create new product
 exports.createProduct = async (req, res) => {
   try {
     let imageUrls = [];
@@ -182,31 +182,10 @@ exports.createProduct = async (req, res) => {
       imageUrls = results;
     }
 
-    // Handle both old and new price field names for backward compatibility
-    let sellingPrice, purchasingPrice;
-
-    // Check if new field names are provided
-    if (req.body.sellingPrice !== undefined && req.body.purchasingPrice !== undefined) {
-      sellingPrice = parseFloat(req.body.sellingPrice);
-      purchasingPrice = parseFloat(req.body.purchasingPrice);
-    } 
-    // Fallback to old field name for backward compatibility
-    else if (req.body.price !== undefined) {
-      sellingPrice = parseFloat(req.body.price);
-      purchasingPrice = sellingPrice * 0.8; // Default purchasing price as 80% of selling price
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Price information is required'
-      });
-    }
-
     const productData = {
       ...req.body,
       wholesaler: req.user.id,
-      // Use the new field names
-      sellingPrice: sellingPrice,
-      purchasingPrice: purchasingPrice,
+      price: parseFloat(req.body.price),
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -215,9 +194,6 @@ exports.createProduct = async (req, res) => {
       images: imageUrls,
       fromCertifiedOrder: false // Ensure manually created products are not marked as certified
     };
-
-    // Remove the old price field if it exists to avoid validation issues
-    delete productData.price;
 
     const product = new Product(productData);
     await product.save();
@@ -228,7 +204,6 @@ exports.createProduct = async (req, res) => {
       product
     });
   } catch (error) {
-    console.error('Error creating product:', error);
     res.status(400).json({
       success: false,
       message: 'Error creating product',
@@ -237,7 +212,7 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// Update product - UPDATED: Handle both old and new price fields
+// Update product
 exports.updateProduct = async (req, res) => {
   try {
     let product = await Product.findOne({
@@ -264,23 +239,9 @@ exports.updateProduct = async (req, res) => {
       imageUrls = [...imageUrls, ...results];
     }
 
-    // Handle price fields
-    let sellingPrice = product.sellingPrice;
-    let purchasingPrice = product.purchasingPrice;
-
-    if (req.body.sellingPrice !== undefined && req.body.purchasingPrice !== undefined) {
-      sellingPrice = parseFloat(req.body.sellingPrice);
-      purchasingPrice = parseFloat(req.body.purchasingPrice);
-    } else if (req.body.price !== undefined) {
-      // Fallback for old field name
-      sellingPrice = parseFloat(req.body.price);
-      purchasingPrice = sellingPrice * 0.8;
-    }
-
     const updateData = {
       ...req.body,
-      sellingPrice: sellingPrice,
-      purchasingPrice: purchasingPrice,
+      price: parseFloat(req.body.price),
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -288,9 +249,6 @@ exports.updateProduct = async (req, res) => {
       tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls
     };
-
-    // Remove old price field to avoid validation issues
-    delete updateData.price;
 
     // Prevent updating certified order source for manually created products
     if (!product.fromCertifiedOrder) {
@@ -310,7 +268,6 @@ exports.updateProduct = async (req, res) => {
       product
     });
   } catch (error) {
-    console.error('Error updating product:', error);
     res.status(400).json({
       success: false,
       message: 'Error updating product',

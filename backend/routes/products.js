@@ -11,7 +11,8 @@ const {
   deleteProduct,
   getCategories,
   deleteProductImage,
-  getProductsForRetailers // Add this
+  getProductsForRetailers,
+  getProfitAnalytics // ADD THIS
 } = require('../controllers/productController');
 const auth = require('../middleware/auth'); // This now imports the function directly
 
@@ -55,6 +56,9 @@ router.get('/', getProducts);
 // GET /api/products/categories - Get product categories
 router.get('/categories', getCategories);
 
+// GET /api/products/analytics/profit - Get profit analytics (NEW ROUTE)
+router.get('/analytics/profit', getProfitAnalytics);
+
 // GET /api/products/:id - Get single product
 router.get('/:id', getProduct);
 
@@ -70,7 +74,7 @@ router.delete('/:id', deleteProduct);
 // DELETE /api/products/:productId/images/:imageId - Delete specific product image
 router.delete('/:productId/images/:imageId', deleteProductImage);
 
-// NEW ROUTE: GET /api/products/retailer/all - Get all active products for retailers
+// GET /api/products/retailer/all - Get all active products for retailers
 router.get('/retailer/all', getProductsForRetailers);
 
 module.exports = router;

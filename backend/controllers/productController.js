@@ -35,6 +35,19 @@ const uploadToCloudinary = async (file, userId) => {
   }
 };
 
+// Helper function to validate pricing
+const validatePricing = (purchasingPrice, sellingPrice) => {
+  if (purchasingPrice <= 0) {
+    throw new Error('Purchasing price must be greater than 0');
+  }
+  if (sellingPrice <= 0) {
+    throw new Error('Selling price must be greater than 0');
+  }
+  if (sellingPrice < purchasingPrice) {
+    throw new Error('Selling price cannot be less than purchasing price');
+  }
+};
+
 // Get all products for a wholesaler (INCLUDES CERTIFIED PRODUCTS)
 exports.getProducts = async (req, res) => {
   try {
@@ -182,10 +195,17 @@ exports.createProduct = async (req, res) => {
       imageUrls = results;
     }
 
+    // Parse and validate pricing
+    const purchasingPrice = parseFloat(req.body.purchasingPrice);
+    const sellingPrice = parseFloat(req.body.sellingPrice);
+    
+    validatePricing(purchasingPrice, sellingPrice);
+
     const productData = {
       ...req.body,
       wholesaler: req.user.id,
-      price: parseFloat(req.body.price),
+      purchasingPrice: purchasingPrice,
+      sellingPrice: sellingPrice,
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -239,9 +259,24 @@ exports.updateProduct = async (req, res) => {
       imageUrls = [...imageUrls, ...results];
     }
 
+    // Parse and validate pricing if provided
+    let purchasingPrice = product.purchasingPrice;
+    let sellingPrice = product.sellingPrice;
+    
+    if (req.body.purchasingPrice !== undefined) {
+      purchasingPrice = parseFloat(req.body.purchasingPrice);
+    }
+    
+    if (req.body.sellingPrice !== undefined) {
+      sellingPrice = parseFloat(req.body.sellingPrice);
+    }
+    
+    validatePricing(purchasingPrice, sellingPrice);
+
     const updateData = {
       ...req.body,
-      price: parseFloat(req.body.price),
+      purchasingPrice: purchasingPrice,
+      sellingPrice: sellingPrice,
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -376,6 +411,325 @@ exports.deleteProductImage = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error deleting image',
+      error: error.message
+    });
+  }
+};
+
+// Get products with low stock alert
+exports.getLowStockProducts = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    
+    const filter = { 
+      wholesaler: req.user.id,
+      isActive: true,
+      lowStockAlert: true
+    };
+
+    const products = await Product.find(filter)
+      .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
+      .sort({ lowStockAlertAt: -1, quantity: 1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Product.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      products,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching low stock products',
+      error: error.message
+    });
+  }
+};
+
+// Get products statistics for dashboard
+exports.getProductStats = async (req, res) => {
+  try {
+    const wholesalerId = req.user.id;
+    
+    const totalProducts = await Product.countDocuments({
+      wholesaler: wholesalerId,
+      isActive: true
+    });
+
+    const lowStockProducts = await Product.countDocuments({
+      wholesaler: wholesalerId,
+      isActive: true,
+      lowStockAlert: true
+    });
+
+    const outOfStockProducts = await Product.countDocuments({
+      wholesaler: wholesalerId,
+      isActive: true,
+      quantity: 0
+    });
+
+    const certifiedProducts = await Product.countDocuments({
+      wholesaler: wholesalerId,
+      isActive: true,
+      fromCertifiedOrder: true
+    });
+
+    // Calculate total inventory value and potential profit
+    const inventoryStats = await Product.aggregate([
+      {
+        $match: {
+          wholesaler: mongoose.Types.ObjectId(wholesalerId),
+          isActive: true
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalInventoryValue: { 
+            $sum: { $multiply: ['$quantity', '$purchasingPrice'] } 
+          },
+          totalPotentialProfit: { 
+            $sum: { $multiply: ['$quantity', { $subtract: ['$sellingPrice', '$purchasingPrice'] }] } 
+          },
+          averageProfitMargin: {
+            $avg: {
+              $cond: [
+                { $eq: ['$purchasingPrice', 0] },
+                0,
+                { $multiply: [{ $divide: [{ $subtract: ['$sellingPrice', '$purchasingPrice'] }, '$purchasingPrice'] }, 100] }
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const stats = inventoryStats[0] || {
+      totalInventoryValue: 0,
+      totalPotentialProfit: 0,
+      averageProfitMargin: 0
+    };
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        totalProducts,
+        lowStockProducts,
+        outOfStockProducts,
+        certifiedProducts,
+        totalInventoryValue: stats.totalInventoryValue,
+        totalPotentialProfit: stats.totalPotentialProfit,
+        averageProfitMargin: stats.averageProfitMargin
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching product statistics',
+      error: error.message
+    });
+  }
+};
+
+// Update product stock
+exports.updateProductStock = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { quantity, operation = 'set' } = req.body; // operation: 'set', 'add', 'subtract'
+
+    const product = await Product.findOne({
+      _id: productId,
+      wholesaler: req.user.id
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    let newQuantity = product.quantity;
+    
+    switch (operation) {
+      case 'add':
+        newQuantity += parseInt(quantity);
+        break;
+      case 'subtract':
+        newQuantity = Math.max(0, newQuantity - parseInt(quantity));
+        break;
+      case 'set':
+      default:
+        newQuantity = parseInt(quantity);
+        break;
+    }
+
+    if (newQuantity < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity cannot be negative'
+      });
+    }
+
+    product.quantity = newQuantity;
+    await product.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Product stock updated successfully',
+      product
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: 'Error updating product stock',
+      error: error.message
+    });
+  }
+};
+
+// Bulk update products
+exports.bulkUpdateProducts = async (req, res) => {
+  try {
+    const { products } = req.body; // Array of { productId, updates }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Products array is required'
+      });
+    }
+
+    const updatePromises = products.map(async (item) => {
+      const product = await Product.findOne({
+        _id: item.productId,
+        wholesaler: req.user.id
+      });
+
+      if (!product) {
+        throw new Error(`Product not found: ${item.productId}`);
+      }
+
+      // Validate pricing if provided
+      if (item.updates.purchasingPrice !== undefined || item.updates.sellingPrice !== undefined) {
+        const purchasingPrice = item.updates.purchasingPrice !== undefined 
+          ? parseFloat(item.updates.purchasingPrice) 
+          : product.purchasingPrice;
+        
+        const sellingPrice = item.updates.sellingPrice !== undefined 
+          ? parseFloat(item.updates.sellingPrice) 
+          : product.sellingPrice;
+        
+        validatePricing(purchasingPrice, sellingPrice);
+      }
+
+      return Product.findByIdAndUpdate(
+        item.productId,
+        { ...item.updates },
+        { new: true, runValidators: true }
+      );
+    });
+
+    const updatedProducts = await Promise.all(updatePromises);
+
+    res.status(200).json({
+      success: true,
+      message: 'Products updated successfully',
+      products: updatedProducts
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: 'Error updating products',
+      error: error.message
+    });
+  }
+};
+
+// Search products with advanced filters
+exports.searchProducts = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 10, 
+      category, 
+      search, 
+      minPrice, 
+      maxPrice, 
+      minQuantity, 
+      maxQuantity,
+      hasBulkDiscount,
+      tags,
+      sortBy = 'name',
+      sortOrder = 'asc'
+    } = req.query;
+    
+    const filter = { 
+      wholesaler: req.user.id,
+      isActive: true
+    };
+    
+    if (category && category !== 'all') {
+      filter.category = category;
+    }
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { tags: { $in: [new RegExp(search, 'i')] } }
+      ];
+    }
+
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      filter.sellingPrice = {};
+      if (minPrice !== undefined) filter.sellingPrice.$gte = parseFloat(minPrice);
+      if (maxPrice !== undefined) filter.sellingPrice.$lte = parseFloat(maxPrice);
+    }
+
+    if (minQuantity !== undefined || maxQuantity !== undefined) {
+      filter.quantity = {};
+      if (minQuantity !== undefined) filter.quantity.$gte = parseInt(minQuantity);
+      if (maxQuantity !== undefined) filter.quantity.$lte = parseInt(maxQuantity);
+    }
+
+    if (hasBulkDiscount !== undefined) {
+      filter.bulkDiscount = hasBulkDiscount === 'true';
+    }
+
+    if (tags) {
+      const tagArray = tags.split(',').map(tag => tag.trim());
+      filter.tags = { $in: tagArray };
+    }
+
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    const products = await Product.find(filter)
+      .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
+      .sort(sortOptions)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Product.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      products,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error while searching products',
       error: error.message
     });
   }

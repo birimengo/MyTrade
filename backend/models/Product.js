@@ -1,4 +1,3 @@
-// models/Product.js
 const mongoose = require('mongoose');
 
 // Add this image schema definition
@@ -38,7 +37,13 @@ const productSchema = new mongoose.Schema({
     required: true,
     maxlength: 1000
   },
-  price: {
+  // RENAME price to sellingPrice and ADD purchasingPrice
+  sellingPrice: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  purchasingPrice: {
     type: Number,
     required: true,
     min: 0
@@ -51,7 +56,6 @@ const productSchema = new mongoose.Schema({
   measurementUnit: {
     type: String,
     required: true,
-    //enum: ['units', 'kg', 'g', 'l', 'ml', 'pack', 'box', 'carton', 'dozen'],
     default: 'units'
   },
   category: {
@@ -146,6 +150,17 @@ productSchema.pre('save', async function(next) {
   next();
 });
 
+// Virtual for profit margin
+productSchema.virtual('profitMargin').get(function() {
+  if (this.purchasingPrice === 0) return 0;
+  return ((this.sellingPrice - this.purchasingPrice) / this.purchasingPrice) * 100;
+});
+
+// Virtual for profit amount
+productSchema.virtual('profitAmount').get(function() {
+  return this.sellingPrice - this.purchasingPrice;
+});
+
 // Method to check low stock
 productSchema.methods.checkLowStock = function() {
   if (this.originalStockQuantity && this.originalStockQuantity > 0) {
@@ -185,5 +200,9 @@ productSchema.index({ lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 }); // New index for certified products
 productSchema.index({ isActive: 1 }); // New index for active products
+
+// Ensure virtual fields are serialized
+productSchema.set('toJSON', { virtuals: true });
+productSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Product', productSchema);

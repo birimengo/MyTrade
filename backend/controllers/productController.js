@@ -1,9 +1,8 @@
-// controllers/productController.js
+// controllers/productController.js - UPDATED VERSION
 const Product = require('../models/Product');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 const path = require('path');
-const mongoose = require('mongoose'); // Added missing import
 
 // Helper function to upload image to Cloudinary
 const uploadToCloudinary = async (file, userId) => {
@@ -34,36 +33,6 @@ const uploadToCloudinary = async (file, userId) => {
     }
     throw error;
   }
-};
-
-// Helper function to validate pricing
-const validatePricing = (purchasingPrice, sellingPrice) => {
-  if (purchasingPrice === undefined || purchasingPrice === null || purchasingPrice <= 0) {
-    throw new Error('Purchasing price must be greater than 0');
-  }
-  if (sellingPrice === undefined || sellingPrice === null || sellingPrice <= 0) {
-    throw new Error('Selling price must be greater than 0');
-  }
-  if (sellingPrice < purchasingPrice) {
-    throw new Error('Selling price cannot be less than purchasing price');
-  }
-};
-
-// Helper function to parse form data safely
-const parseFormData = (body) => {
-  return {
-    name: body.name?.trim(),
-    description: body.description?.trim(),
-    purchasingPrice: body.purchasingPrice ? parseFloat(body.purchasingPrice) : undefined,
-    sellingPrice: body.sellingPrice ? parseFloat(body.sellingPrice) : undefined,
-    quantity: body.quantity ? parseInt(body.quantity) : undefined,
-    measurementUnit: body.measurementUnit || 'units',
-    category: body.category?.trim(),
-    minOrderQuantity: body.minOrderQuantity ? parseInt(body.minOrderQuantity) : 1,
-    bulkDiscount: body.bulkDiscount === 'true' || body.bulkDiscount === true,
-    discountPercentage: body.discountPercentage ? parseFloat(body.discountPercentage) : 0,
-    tags: body.tags ? body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : []
-  };
 };
 
 // Get all products for a wholesaler (INCLUDES CERTIFIED PRODUCTS)
@@ -109,7 +78,6 @@ exports.getProducts = async (req, res) => {
       total
     });
   } catch (error) {
-    console.error('Error fetching products:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching products',
@@ -162,7 +130,6 @@ exports.getProductsForRetailers = async (req, res) => {
       total
     });
   } catch (error) {
-    console.error('Error fetching products for retailers:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching products',
@@ -192,7 +159,6 @@ exports.getProduct = async (req, res) => {
       product
     });
   } catch (error) {
-    console.error('Error fetching product:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching product',
@@ -201,73 +167,60 @@ exports.getProduct = async (req, res) => {
   }
 };
 
-// Create new product
+// Create new product - UPDATED: Handle both old and new price fields
 exports.createProduct = async (req, res) => {
   try {
-    console.log('Creating product with data:', req.body);
-    
     let imageUrls = [];
     
     // Upload images to Cloudinary if any
     if (req.files && req.files.length > 0) {
-      console.log(`Uploading ${req.files.length} images to Cloudinary`);
       const uploadPromises = req.files.map(file => 
         uploadToCloudinary(file, req.user.id)
       );
       
       const results = await Promise.all(uploadPromises);
       imageUrls = results;
-      console.log('Images uploaded successfully:', imageUrls.length);
     }
 
-    // Parse and validate form data
-    const parsedData = parseFormData(req.body);
-    
-    // Validate required fields
-    if (!parsedData.name) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product name is required'
-      });
-    }
+    // Handle both old and new price field names for backward compatibility
+    let sellingPrice, purchasingPrice;
 
-    if (!parsedData.category) {
+    // Check if new field names are provided
+    if (req.body.sellingPrice !== undefined && req.body.purchasingPrice !== undefined) {
+      sellingPrice = parseFloat(req.body.sellingPrice);
+      purchasingPrice = parseFloat(req.body.purchasingPrice);
+    } 
+    // Fallback to old field name for backward compatibility
+    else if (req.body.price !== undefined) {
+      sellingPrice = parseFloat(req.body.price);
+      purchasingPrice = sellingPrice * 0.8; // Default purchasing price as 80% of selling price
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Product category is required'
-      });
-    }
-
-    if (parsedData.quantity === undefined || parsedData.quantity < 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Valid quantity is required'
-      });
-    }
-
-    // Validate pricing
-    try {
-      validatePricing(parsedData.purchasingPrice, parsedData.sellingPrice);
-    } catch (pricingError) {
-      return res.status(400).json({
-        success: false,
-        message: pricingError.message
+        message: 'Price information is required'
       });
     }
 
     const productData = {
-      ...parsedData,
+      ...req.body,
       wholesaler: req.user.id,
+      // Use the new field names
+      sellingPrice: sellingPrice,
+      purchasingPrice: purchasingPrice,
+      quantity: parseInt(req.body.quantity),
+      minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
+      bulkDiscount: req.body.bulkDiscount === 'true',
+      discountPercentage: req.body.discountPercentage ? parseFloat(req.body.discountPercentage) : 0,
+      tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls,
       fromCertifiedOrder: false // Ensure manually created products are not marked as certified
     };
 
-    console.log('Creating product with data:', productData);
+    // Remove the old price field if it exists to avoid validation issues
+    delete productData.price;
 
     const product = new Product(productData);
     await product.save();
-
-    console.log('Product created successfully:', product._id);
 
     res.status(201).json({
       success: true,
@@ -276,25 +229,6 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating product:', error);
-    
-    // Handle duplicate key errors
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product with this SKU already exists'
-      });
-    }
-
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        errors: errors
-      });
-    }
-
     res.status(400).json({
       success: false,
       message: 'Error creating product',
@@ -303,12 +237,9 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// Update product
+// Update product - UPDATED: Handle both old and new price fields
 exports.updateProduct = async (req, res) => {
   try {
-    console.log('Updating product:', req.params.id);
-    console.log('Update data:', req.body);
-
     let product = await Product.findOne({
       _id: req.params.id,
       wholesaler: req.user.id
@@ -325,7 +256,6 @@ exports.updateProduct = async (req, res) => {
     
     // Upload new images if any
     if (req.files && req.files.length > 0) {
-      console.log(`Uploading ${req.files.length} new images`);
       const uploadPromises = req.files.map(file => 
         uploadToCloudinary(file, req.user.id)
       );
@@ -334,36 +264,33 @@ exports.updateProduct = async (req, res) => {
       imageUrls = [...imageUrls, ...results];
     }
 
-    // Parse form data
-    const parsedData = parseFormData(req.body);
-
-    // Validate pricing if provided
-    let purchasingPrice = product.purchasingPrice;
+    // Handle price fields
     let sellingPrice = product.sellingPrice;
-    
-    if (parsedData.purchasingPrice !== undefined) {
-      purchasingPrice = parsedData.purchasingPrice;
-    }
-    
-    if (parsedData.sellingPrice !== undefined) {
-      sellingPrice = parsedData.sellingPrice;
-    }
-    
-    try {
-      validatePricing(purchasingPrice, sellingPrice);
-    } catch (pricingError) {
-      return res.status(400).json({
-        success: false,
-        message: pricingError.message
-      });
+    let purchasingPrice = product.purchasingPrice;
+
+    if (req.body.sellingPrice !== undefined && req.body.purchasingPrice !== undefined) {
+      sellingPrice = parseFloat(req.body.sellingPrice);
+      purchasingPrice = parseFloat(req.body.purchasingPrice);
+    } else if (req.body.price !== undefined) {
+      // Fallback for old field name
+      sellingPrice = parseFloat(req.body.price);
+      purchasingPrice = sellingPrice * 0.8;
     }
 
     const updateData = {
-      ...parsedData,
-      purchasingPrice: purchasingPrice,
+      ...req.body,
       sellingPrice: sellingPrice,
+      purchasingPrice: purchasingPrice,
+      quantity: parseInt(req.body.quantity),
+      minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
+      bulkDiscount: req.body.bulkDiscount === 'true',
+      discountPercentage: req.body.discountPercentage ? parseFloat(req.body.discountPercentage) : 0,
+      tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls
     };
+
+    // Remove old price field to avoid validation issues
+    delete updateData.price;
 
     // Prevent updating certified order source for manually created products
     if (!product.fromCertifiedOrder) {
@@ -371,15 +298,11 @@ exports.updateProduct = async (req, res) => {
       delete updateData.certifiedOrderSource;
     }
 
-    console.log('Final update data:', updateData);
-
     product = await Product.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     );
-
-    console.log('Product updated successfully');
 
     res.status(200).json({
       success: true,
@@ -388,17 +311,6 @@ exports.updateProduct = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating product:', error);
-    
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        errors: errors
-      });
-    }
-
     res.status(400).json({
       success: false,
       message: 'Error updating product',
@@ -424,7 +336,6 @@ exports.deleteProduct = async (req, res) => {
 
     // Delete images from Cloudinary
     if (product.images && product.images.length > 0) {
-      console.log(`Deleting ${product.images.length} images from Cloudinary`);
       const deletePromises = product.images.map(image => {
         return cloudinary.uploader.destroy(image.publicId);
       });
@@ -434,14 +345,11 @@ exports.deleteProduct = async (req, res) => {
 
     await Product.findByIdAndDelete(req.params.id);
 
-    console.log('Product deleted successfully:', req.params.id);
-
     res.status(200).json({
       success: true,
       message: 'Product deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting product:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting product',
@@ -460,10 +368,9 @@ exports.getCategories = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      categories: categories || []
+      categories
     });
   } catch (error) {
-    console.error('Error fetching categories:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching categories',
@@ -509,358 +416,9 @@ exports.deleteProductImage = async (req, res) => {
       message: 'Image deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting product image:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting image',
-      error: error.message
-    });
-  }
-};
-
-// Get products with low stock alert
-exports.getLowStockProducts = async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
-    
-    const filter = { 
-      wholesaler: req.user.id,
-      isActive: true,
-      lowStockAlert: true
-    };
-
-    const products = await Product.find(filter)
-      .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
-      .sort({ lowStockAlertAt: -1, quantity: 1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Product.countDocuments(filter);
-
-    res.status(200).json({
-      success: true,
-      products,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
-    });
-  } catch (error) {
-    console.error('Error fetching low stock products:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching low stock products',
-      error: error.message
-    });
-  }
-};
-
-// Get products statistics for dashboard
-exports.getProductStats = async (req, res) => {
-  try {
-    const wholesalerId = req.user.id;
-    
-    const totalProducts = await Product.countDocuments({
-      wholesaler: wholesalerId,
-      isActive: true
-    });
-
-    const lowStockProducts = await Product.countDocuments({
-      wholesaler: wholesalerId,
-      isActive: true,
-      lowStockAlert: true
-    });
-
-    const outOfStockProducts = await Product.countDocuments({
-      wholesaler: wholesalerId,
-      isActive: true,
-      quantity: 0
-    });
-
-    const certifiedProducts = await Product.countDocuments({
-      wholesaler: wholesalerId,
-      isActive: true,
-      fromCertifiedOrder: true
-    });
-
-    // Calculate total inventory value and potential profit
-    const inventoryStats = await Product.aggregate([
-      {
-        $match: {
-          wholesaler: mongoose.Types.ObjectId(wholesalerId),
-          isActive: true
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalInventoryValue: { 
-            $sum: { $multiply: ['$quantity', '$purchasingPrice'] } 
-          },
-          totalPotentialProfit: { 
-            $sum: { $multiply: ['$quantity', { $subtract: ['$sellingPrice', '$purchasingPrice'] }] } 
-          },
-          averageProfitMargin: {
-            $avg: {
-              $cond: [
-                { $eq: ['$purchasingPrice', 0] },
-                0,
-                { $multiply: [{ $divide: [{ $subtract: ['$sellingPrice', '$purchasingPrice'] }, '$purchasingPrice'] }, 100] }
-              ]
-            }
-          }
-        }
-      }
-    ]);
-
-    const stats = inventoryStats[0] || {
-      totalInventoryValue: 0,
-      totalPotentialProfit: 0,
-      averageProfitMargin: 0
-    };
-
-    res.status(200).json({
-      success: true,
-      stats: {
-        totalProducts,
-        lowStockProducts,
-        outOfStockProducts,
-        certifiedProducts,
-        totalInventoryValue: stats.totalInventoryValue || 0,
-        totalPotentialProfit: stats.totalPotentialProfit || 0,
-        averageProfitMargin: stats.averageProfitMargin || 0
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching product statistics:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching product statistics',
-      error: error.message
-    });
-  }
-};
-
-// Update product stock
-exports.updateProductStock = async (req, res) => {
-  try {
-    const { productId } = req.params;
-    const { quantity, operation = 'set' } = req.body; // operation: 'set', 'add', 'subtract'
-
-    const product = await Product.findOne({
-      _id: productId,
-      wholesaler: req.user.id
-    });
-
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-
-    let newQuantity = product.quantity;
-    
-    switch (operation) {
-      case 'add':
-        newQuantity += parseInt(quantity);
-        break;
-      case 'subtract':
-        newQuantity = Math.max(0, newQuantity - parseInt(quantity));
-        break;
-      case 'set':
-      default:
-        newQuantity = parseInt(quantity);
-        break;
-    }
-
-    if (newQuantity < 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Quantity cannot be negative'
-      });
-    }
-
-    product.quantity = newQuantity;
-    await product.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Product stock updated successfully',
-      product
-    });
-  } catch (error) {
-    console.error('Error updating product stock:', error);
-    res.status(400).json({
-      success: false,
-      message: 'Error updating product stock',
-      error: error.message
-    });
-  }
-};
-
-// Bulk update products
-exports.bulkUpdateProducts = async (req, res) => {
-  try {
-    const { products } = req.body; // Array of { productId, updates }
-
-    if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Products array is required'
-      });
-    }
-
-    const updatePromises = products.map(async (item) => {
-      const product = await Product.findOne({
-        _id: item.productId,
-        wholesaler: req.user.id
-      });
-
-      if (!product) {
-        throw new Error(`Product not found: ${item.productId}`);
-      }
-
-      // Validate pricing if provided
-      if (item.updates.purchasingPrice !== undefined || item.updates.sellingPrice !== undefined) {
-        const purchasingPrice = item.updates.purchasingPrice !== undefined 
-          ? parseFloat(item.updates.purchasingPrice) 
-          : product.purchasingPrice;
-        
-        const sellingPrice = item.updates.sellingPrice !== undefined 
-          ? parseFloat(item.updates.sellingPrice) 
-          : product.sellingPrice;
-        
-        validatePricing(purchasingPrice, sellingPrice);
-      }
-
-      return Product.findByIdAndUpdate(
-        item.productId,
-        { ...item.updates },
-        { new: true, runValidators: true }
-      );
-    });
-
-    const updatedProducts = await Promise.all(updatePromises);
-
-    res.status(200).json({
-      success: true,
-      message: 'Products updated successfully',
-      products: updatedProducts
-    });
-  } catch (error) {
-    console.error('Error bulk updating products:', error);
-    res.status(400).json({
-      success: false,
-      message: 'Error updating products',
-      error: error.message
-    });
-  }
-};
-
-// Search products with advanced filters
-exports.searchProducts = async (req, res) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      category, 
-      search, 
-      minPrice, 
-      maxPrice, 
-      minQuantity, 
-      maxQuantity,
-      hasBulkDiscount,
-      tags,
-      sortBy = 'name',
-      sortOrder = 'asc'
-    } = req.query;
-    
-    const filter = { 
-      wholesaler: req.user.id,
-      isActive: true
-    };
-    
-    if (category && category !== 'all') {
-      filter.category = category;
-    }
-    
-    if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
-      ];
-    }
-
-    if (minPrice !== undefined || maxPrice !== undefined) {
-      filter.sellingPrice = {};
-      if (minPrice !== undefined) filter.sellingPrice.$gte = parseFloat(minPrice);
-      if (maxPrice !== undefined) filter.sellingPrice.$lte = parseFloat(maxPrice);
-    }
-
-    if (minQuantity !== undefined || maxQuantity !== undefined) {
-      filter.quantity = {};
-      if (minQuantity !== undefined) filter.quantity.$gte = parseInt(minQuantity);
-      if (maxQuantity !== undefined) filter.quantity.$lte = parseInt(maxQuantity);
-    }
-
-    if (hasBulkDiscount !== undefined) {
-      filter.bulkDiscount = hasBulkDiscount === 'true';
-    }
-
-    if (tags) {
-      const tagArray = tags.split(',').map(tag => tag.trim());
-      filter.tags = { $in: tagArray };
-    }
-
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-    const products = await Product.find(filter)
-      .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
-      .sort(sortOptions)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Product.countDocuments(filter);
-
-    res.status(200).json({
-      success: true,
-      products,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
-    });
-  } catch (error) {
-    console.error('Error searching products:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while searching products',
-      error: error.message
-    });
-  }
-};
-
-// Health check endpoint
-exports.healthCheck = async (req, res) => {
-  try {
-    const productCount = await Product.countDocuments({ wholesaler: req.user.id });
-    
-    res.status(200).json({
-      success: true,
-      message: 'Product service is healthy',
-      data: {
-        totalProducts: productCount,
-        service: 'Product Management',
-        status: 'Operational'
-      }
-    });
-  } catch (error) {
-    console.error('Health check failed:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Product service health check failed',
       error: error.message
     });
   }

@@ -37,7 +37,7 @@ const productSchema = new mongoose.Schema({
     required: true,
     maxlength: 1000
   },
-  // RENAME price to sellingPrice and ADD purchasingPrice
+  // CHANGED: Rename price to sellingPrice and add purchasingPrice
   sellingPrice: {
     type: Number,
     required: true,
@@ -150,14 +150,16 @@ productSchema.pre('save', async function(next) {
   next();
 });
 
-// Virtual for profit margin
+// Virtual for profit margin calculation
 productSchema.virtual('profitMargin').get(function() {
-  if (this.purchasingPrice === 0) return 0;
-  return ((this.sellingPrice - this.purchasingPrice) / this.purchasingPrice) * 100;
+  if (this.purchasingPrice > 0) {
+    return ((this.sellingPrice - this.purchasingPrice) / this.purchasingPrice) * 100;
+  }
+  return 0;
 });
 
-// Virtual for profit amount
-productSchema.virtual('profitAmount').get(function() {
+// Virtual for profit per unit
+productSchema.virtual('profitPerUnit').get(function() {
   return this.sellingPrice - this.purchasingPrice;
 });
 
@@ -192,17 +194,17 @@ productSchema.pre('save', function(next) {
   next();
 });
 
+// Ensure virtual fields are included in JSON output
+productSchema.set('toJSON', { virtuals: true });
+productSchema.set('toObject', { virtuals: true });
+
 // Indexes for better query performance
 productSchema.index({ wholesaler: 1, category: 1 });
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
 productSchema.index({ sku: 1 }, { unique: true, sparse: true });
 productSchema.index({ lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, lowStockAlert: 1 });
-productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 }); // New index for certified products
-productSchema.index({ isActive: 1 }); // New index for active products
-
-// Ensure virtual fields are serialized
-productSchema.set('toJSON', { virtuals: true });
-productSchema.set('toObject', { virtuals: true });
+productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
+productSchema.index({ isActive: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

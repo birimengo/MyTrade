@@ -1,3 +1,4 @@
+// models/Product.js - UPDATED VERSION
 const mongoose = require('mongoose');
 
 // Add this image schema definition
@@ -37,7 +38,13 @@ const productSchema = new mongoose.Schema({
     required: true,
     maxlength: 1000
   },
-  // CHANGED: Rename price to sellingPrice and add purchasingPrice
+  // REMOVED: Old price field
+  // price: {
+  //   type: Number,
+  //   required: true,
+  //   min: 0
+  // },
+  // ADDED: New price fields
   sellingPrice: {
     type: Number,
     required: true,

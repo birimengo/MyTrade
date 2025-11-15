@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Add this image schema definition
+// Image schema definition
 const imageSchema = new mongoose.Schema({
   url: {
     type: String,
@@ -25,7 +25,7 @@ const imageSchema = new mongoose.Schema({
   }
 });
 
-// Price history schema to track price changes
+// Enhanced price history schema with change types
 const priceHistorySchema = new mongoose.Schema({
   sellingPrice: {
     type: Number,
@@ -48,6 +48,14 @@ const priceHistorySchema = new mongoose.Schema({
     default: 'Price adjustment'
   },
   saleReference: {
+    type: String
+  },
+  changeType: {
+    type: String,
+    enum: ['manual', 'sale', 'market_adjustment', 'cost_change', 'promotional', 'bulk_update', 'initial', 'auto_adjustment'],
+    default: 'manual'
+  },
+  note: {
     type: String
   }
 });
@@ -91,7 +99,7 @@ const productSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  // Update images field to use the imageSchema
+  // Images field using the imageSchema
   images: [imageSchema],
   minOrderQuantity: {
     type: Number,
@@ -126,7 +134,7 @@ const productSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
-  // NEW FIELDS FOR STOCK MANAGEMENT
+  // Stock Management
   lowStockAlert: {
     type: Boolean,
     default: false
@@ -143,11 +151,11 @@ const productSchema = new mongoose.Schema({
   },
   lowStockThreshold: {
     type: Number,
-    default: 0.5, // 50% threshold by default
+    default: 0.5,
     min: 0.1,
     max: 0.9
   },
-  // NEW FIELDS FOR CERTIFIED PRODUCTS
+  // Certified Products
   fromCertifiedOrder: {
     type: Boolean,
     default: false
@@ -165,7 +173,7 @@ const productSchema = new mongoose.Schema({
       type: Date
     }
   },
-  // NEW FIELDS FOR PRICE EDITING TRACKING
+  // Price Editing Tracking
   priceManuallyEdited: {
     type: Boolean,
     default: false
@@ -174,17 +182,29 @@ const productSchema = new mongoose.Schema({
     type: Number,
     min: 0
   },
-  // Price history to track all price changes
+  // Enhanced price history
   priceHistory: [priceHistorySchema],
   // Last price change information
   lastPriceChange: {
     previousPrice: Number,
+    newPrice: Number,
     changedAt: Date,
     changedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     },
-    reason: String
+    reason: String,
+    changeType: String
+  },
+  // Price statistics
+  priceStatistics: {
+    highestPrice: Number,
+    lowestPrice: Number,
+    averagePrice: Number,
+    priceChangeCount: {
+      type: Number,
+      default: 0
+    }
   }
 }, {
   timestamps: true
@@ -192,7 +212,7 @@ const productSchema = new mongoose.Schema({
 
 // Virtual for profit margin calculation
 productSchema.virtual('profitMargin').get(function() {
-  if (this.costPrice && this.price) {
+  if (this.costPrice && this.price && this.costPrice > 0) {
     return ((this.price - this.costPrice) / this.costPrice * 100).toFixed(2);
   }
   return 0;
@@ -230,7 +250,6 @@ productSchema.methods.checkLowStock = function() {
     const wasLowStock = this.lowStockAlert;
     this.lowStockAlert = this.quantity <= threshold;
     
-    // Set alert timestamp only when it becomes low stock
     if (this.lowStockAlert && !wasLowStock) {
       this.lowStockAlertAt = new Date();
     }
@@ -238,41 +257,138 @@ productSchema.methods.checkLowStock = function() {
   return this.lowStockAlert;
 };
 
-// Method to update price with history tracking
-productSchema.methods.updatePrice = function(newPrice, userId, reason = 'Price adjustment', saleReference = null) {
-  // Add current price to history before updating
-  this.priceHistory.push({
-    sellingPrice: this.price,
-    costPrice: this.costPrice,
-    changedAt: new Date(),
-    changedBy: userId,
-    reason: reason,
-    saleReference: saleReference
-  });
+// Enhanced method to update price with comprehensive history tracking
+productSchema.methods.updatePrice = function(newPrice, userId, reason = 'Price adjustment', saleReference = null, changeType = 'manual', note = '') {
+  const oldPrice = this.price;
+  const newSellingPrice = parseFloat(newPrice);
+  
+  // Only track if price actually changed
+  if (newSellingPrice !== oldPrice) {
+    // Add current price to history before updating
+    this.priceHistory.push({
+      sellingPrice: oldPrice,
+      costPrice: this.costPrice,
+      changedAt: new Date(),
+      changedBy: userId,
+      reason: reason,
+      saleReference: saleReference,
+      changeType: changeType,
+      note: note
+    });
 
-  // Update last price change info
-  this.lastPriceChange = {
-    previousPrice: this.price,
-    changedAt: new Date(),
-    changedBy: userId,
-    reason: reason
-  };
+    // Update last price change info
+    this.lastPriceChange = {
+      previousPrice: oldPrice,
+      newPrice: newSellingPrice,
+      changedAt: new Date(),
+      changedBy: userId,
+      reason: reason,
+      changeType: changeType
+    };
 
-  // Update current price
-  this.price = newPrice;
-  this.priceManuallyEdited = true;
+    // Update current price
+    this.price = newSellingPrice;
+    this.priceManuallyEdited = changeType === 'manual';
+    
+    // Update price statistics
+    this.updatePriceStatistics();
 
-  // Set original selling price if not set
-  if (!this.originalSellingPrice) {
-    this.originalSellingPrice = this.lastPriceChange.previousPrice;
+    // Set original selling price if not set
+    if (!this.originalSellingPrice) {
+      this.originalSellingPrice = oldPrice;
+    }
+    
+    // Increment price change counter
+    this.priceStatistics.priceChangeCount += 1;
   }
 };
 
-// Pre-save middleware to check low stock and set original stock quantity
+// Method to update price statistics
+productSchema.methods.updatePriceStatistics = function() {
+  if (this.priceHistory.length > 0) {
+    const prices = this.priceHistory.map(entry => entry.sellingPrice);
+    prices.push(this.price); // Include current price
+    
+    this.priceStatistics.highestPrice = Math.max(...prices);
+    this.priceStatistics.lowestPrice = Math.min(...prices);
+    this.priceStatistics.averagePrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+  }
+};
+
+// Method to generate sample price history for existing products
+productSchema.methods.generateSamplePriceHistory = function(userId, daysBack = 90) {
+  if (this.priceHistory.length <= 1) { // Only generate if minimal history exists
+    const sampleHistory = [];
+    const currentDate = new Date();
+    const costPrice = this.costPrice;
+    const currentPrice = this.price;
+
+    // Generate realistic price points over the specified days
+    const numberOfEntries = Math.floor(Math.random() * 8) + 5; // 5-12 entries
+    
+    const reasons = [
+      'Market price adjustment',
+      'Supplier cost change',
+      'Seasonal pricing adjustment',
+      'Competitor price matching',
+      'Bulk discount implementation',
+      'Promotional pricing',
+      'Cost optimization',
+      'Demand-based pricing',
+      'Inventory clearance',
+      'New supplier pricing'
+    ];
+    
+    const changeTypes = ['market_adjustment', 'cost_change', 'promotional', 'auto_adjustment'];
+    
+    for (let i = 0; i < numberOfEntries; i++) {
+      const daysAgo = Math.floor(Math.random() * daysBack);
+      const historyDate = new Date(currentDate);
+      historyDate.setDate(historyDate.getDate() - daysAgo);
+      
+      // Generate realistic price fluctuation (within 15-30% of current price)
+      const priceVariation = (Math.random() * 0.3) - 0.15;
+      const historicalPrice = currentPrice * (1 + priceVariation);
+      
+      // Ensure price is realistic (at least 5% above cost)
+      const finalPrice = Math.max(costPrice * 1.05, parseFloat(historicalPrice.toFixed(2)));
+      
+      const reasonIndex = Math.floor(Math.random() * reasons.length);
+      const changeTypeIndex = Math.floor(Math.random() * changeTypes.length);
+      
+      sampleHistory.push({
+        sellingPrice: finalPrice,
+        costPrice: costPrice,
+        changedAt: historyDate,
+        changedBy: userId,
+        reason: reasons[reasonIndex],
+        changeType: changeTypes[changeTypeIndex],
+        note: `Auto-generated sample data`
+      });
+    }
+
+    // Sort by date (oldest first) and add to history
+    sampleHistory.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
+    this.priceHistory = [...sampleHistory, ...this.priceHistory];
+    
+    // Update statistics
+    this.updatePriceStatistics();
+    this.priceStatistics.priceChangeCount += sampleHistory.length;
+  }
+};
+
+// Pre-save middleware
 productSchema.pre('save', function(next) {
   // Set original stock quantity when product is first created
   if (this.isNew && !this.originalStockQuantity) {
     this.originalStockQuantity = this.quantity;
+  }
+  
+  // Initialize price statistics if not set
+  if (!this.priceStatistics) {
+    this.priceStatistics = {
+      priceChangeCount: 0
+    };
   }
   
   // Check low stock whenever quantity changes
@@ -281,13 +397,18 @@ productSchema.pre('save', function(next) {
     this.lastStockUpdate = new Date();
   }
   
+  // Update price statistics when price changes
+  if (this.isModified('price') && this.priceHistory.length > 0) {
+    this.updatePriceStatistics();
+  }
+  
   next();
 });
 
 // Pre-save middleware to validate selling price is not below cost price
 productSchema.pre('save', function(next) {
   if (this.price < this.costPrice) {
-    const error = new Error('Selling price cannot be less than cost price');
+    const error = new Error(`Selling price (${this.price}) cannot be less than cost price (${this.costPrice})`);
     return next(error);
   }
   next();
@@ -305,5 +426,6 @@ productSchema.index({ wholesaler: 1, lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ 'priceHistory.changedAt': -1 });
+productSchema.index({ 'priceStatistics.priceChangeCount': -1 });
 
 module.exports = mongoose.model('Product', productSchema);

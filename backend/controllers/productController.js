@@ -1,7 +1,6 @@
 const Product = require('../models/Product');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
-const path = require('path');
 
 // Helper function to upload image to Cloudinary
 const uploadToCloudinary = async (file, userId) => {
@@ -34,17 +33,16 @@ const uploadToCloudinary = async (file, userId) => {
   }
 };
 
-// Get all products for a wholesaler (INCLUDES CERTIFIED PRODUCTS)
+// Get all products for a wholesaler
 exports.getProducts = async (req, res) => {
   try {
     const { page = 1, limit = 10, category, search, includeCertified = true } = req.query;
     
     const filter = { 
       wholesaler: req.user.id,
-      isActive: true // Only active products
+      isActive: true
     };
     
-    // Include or exclude certified products based on parameter
     if (includeCertified === 'false') {
       filter.fromCertifiedOrder = { $ne: true };
     }
@@ -63,9 +61,9 @@ exports.getProducts = async (req, res) => {
 
     const products = await Product.find(filter)
       .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
-      .populate('lastPriceChange.changedBy', 'firstName lastName')
-      .populate('priceHistory.changedBy', 'firstName lastName')
-      .sort({ fromCertifiedOrder: 1, createdAt: -1 }) // Regular products first, then certified
+      .populate('lastPriceChange.changedBy', 'firstName lastName email')
+      .populate('priceHistory.changedBy', 'firstName lastName email')
+      .sort({ fromCertifiedOrder: 1, createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
@@ -87,17 +85,16 @@ exports.getProducts = async (req, res) => {
   }
 };
 
-// Get products for retailers (ALL ACTIVE PRODUCTS INCLUDING CERTIFIED)
+// Get products for retailers
 exports.getProductsForRetailers = async (req, res) => {
   try {
     const { page = 1, limit = 10, category, search, wholesalerId } = req.query;
     
     const filter = { 
-      isActive: true, // Only active products
-      quantity: { $gt: 0 } // Only products with stock
+      isActive: true,
+      quantity: { $gt: 0 }
     };
     
-    // Filter by specific wholesaler if provided
     if (wholesalerId) {
       filter.wholesaler = wholesalerId;
     }
@@ -147,8 +144,8 @@ exports.getProduct = async (req, res) => {
       wholesaler: req.user.id
     })
     .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
-    .populate('lastPriceChange.changedBy', 'firstName lastName')
-    .populate('priceHistory.changedBy', 'firstName lastName');
+    .populate('lastPriceChange.changedBy', 'firstName lastName email')
+    .populate('priceHistory.changedBy', 'firstName lastName email');
 
     if (!product) {
       return res.status(404).json({
@@ -170,12 +167,11 @@ exports.getProduct = async (req, res) => {
   }
 };
 
-// Create new product
+// Create new product with comprehensive price history
 exports.createProduct = async (req, res) => {
   try {
     let imageUrls = [];
     
-    // Upload images to Cloudinary if any
     if (req.files && req.files.length > 0) {
       const uploadPromises = req.files.map(file => 
         uploadToCloudinary(file, req.user.id)
@@ -196,19 +192,25 @@ exports.createProduct = async (req, res) => {
       discountPercentage: req.body.discountPercentage ? parseFloat(req.body.discountPercentage) : 0,
       tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls,
-      fromCertifiedOrder: false, // Ensure manually created products are not marked as certified
+      fromCertifiedOrder: false,
       priceManuallyEdited: false,
-      originalSellingPrice: parseFloat(req.body.price), // Set initial selling price as original
-      // Initialize price history with the initial price
+      originalSellingPrice: parseFloat(req.body.price),
+      // Initialize with comprehensive price history
       priceHistory: [{
         sellingPrice: parseFloat(req.body.price),
         costPrice: parseFloat(req.body.costPrice),
         changedBy: req.user.id,
-        reason: 'Initial price'
-      }]
+        reason: 'Initial product price',
+        changeType: 'initial'
+      }],
+      priceStatistics: {
+        highestPrice: parseFloat(req.body.price),
+        lowestPrice: parseFloat(req.body.price),
+        averagePrice: parseFloat(req.body.price),
+        priceChangeCount: 1
+      }
     };
 
-    // Validate that selling price is not below cost price
     if (productData.price < productData.costPrice) {
       return res.status(400).json({
         success: false,
@@ -238,11 +240,17 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// Update product price with history tracking
+// Enhanced product price update with comprehensive tracking
 exports.updateProductPrice = async (req, res) => {
   try {
     const { id } = req.params;
-    const { newPrice, reason = 'Price adjustment', saleReference = null } = req.body;
+    const { 
+      newPrice, 
+      reason = 'Manual price adjustment', 
+      saleReference = null, 
+      changeType = 'manual',
+      note = '' 
+    } = req.body;
 
     const product = await Product.findOne({
       _id: id,
@@ -259,22 +267,23 @@ exports.updateProductPrice = async (req, res) => {
     const newSellingPrice = parseFloat(newPrice);
     const costPrice = parseFloat(product.costPrice);
 
-    // Validate that selling price is not below cost price
     if (newSellingPrice < costPrice) {
       return res.status(400).json({
         success: false,
-        message: 'Selling price cannot be less than cost price'
+        message: `Selling price (${newSellingPrice}) cannot be less than cost price (${costPrice})`
       });
     }
 
-    // Use the schema method to update price with history tracking
-    product.updatePrice(newSellingPrice, req.user.id, reason, saleReference);
+    // Use enhanced updatePrice method
+    product.updatePrice(newSellingPrice, req.user.id, reason, saleReference, changeType, note);
     await product.save();
 
-    // Populate the updated product
     const updatedProduct = await Product.findById(id)
-      .populate('lastPriceChange.changedBy', 'firstName lastName')
-      .populate('priceHistory.changedBy', 'firstName lastName');
+      .populate('lastPriceChange.changedBy', 'firstName lastName email')
+      .populate('priceHistory.changedBy', 'firstName lastName email');
+
+    const priceChange = newSellingPrice - product.lastPriceChange.previousPrice;
+    const changePercentage = ((priceChange / product.lastPriceChange.previousPrice) * 100).toFixed(2);
 
     res.status(200).json({
       success: true,
@@ -283,7 +292,9 @@ exports.updateProductPrice = async (req, res) => {
       priceChange: {
         previousPrice: product.lastPriceChange.previousPrice,
         newPrice: newSellingPrice,
-        change: newSellingPrice - product.lastPriceChange.previousPrice
+        change: priceChange,
+        changePercentage: changePercentage,
+        changeType: changeType
       }
     });
   } catch (error) {
@@ -295,7 +306,7 @@ exports.updateProductPrice = async (req, res) => {
   }
 };
 
-// Update product
+// Update product with enhanced price tracking
 exports.updateProduct = async (req, res) => {
   try {
     let product = await Product.findOne({
@@ -312,7 +323,6 @@ exports.updateProduct = async (req, res) => {
 
     let imageUrls = [...product.images];
     
-    // Upload new images if any
     if (req.files && req.files.length > 0) {
       const uploadPromises = req.files.map(file => 
         uploadToCloudinary(file, req.user.id)
@@ -334,7 +344,6 @@ exports.updateProduct = async (req, res) => {
       images: imageUrls
     };
 
-    // NEW: Validate that selling price is not below cost price
     const newSellingPrice = parseFloat(req.body.price);
     const costPrice = parseFloat(req.body.costPrice);
     
@@ -345,54 +354,47 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // NEW: Track price editing and add to history if price changed
+    // Enhanced price change tracking
     if (newSellingPrice !== product.price) {
-      // Add current price to history before updating
-      product.priceHistory.push({
-        sellingPrice: product.price,
-        costPrice: product.costPrice,
-        changedAt: new Date(),
-        changedBy: req.user.id,
-        reason: 'Price update'
-      });
-
-      // Update last price change info
-      updateData.lastPriceChange = {
-        previousPrice: product.price,
-        changedAt: new Date(),
-        changedBy: req.user.id,
-        reason: 'Price update'
-      };
-
-      updateData.priceManuallyEdited = true;
+      product.updatePrice(
+        newSellingPrice, 
+        req.user.id, 
+        'Product update', 
+        null, 
+        'manual', 
+        'Price changed during product update'
+      );
       
-      // Set original selling price if this is the first edit
-      if (!product.originalSellingPrice) {
-        updateData.originalSellingPrice = product.price;
-      }
+      // Update the product with new data including price history changes
+      Object.assign(product, updateData);
+      await product.save();
+    } else {
+      // No price change, just update normally
+      product = await Product.findByIdAndUpdate(
+        req.params.id,
+        updateData,
+        { new: true, runValidators: true }
+      );
     }
 
-    // Prevent updating certified order source for manually created products
+    // Populate the updated product
+    const updatedProduct = await Product.findById(req.params.id)
+      .populate('lastPriceChange.changedBy', 'firstName lastName email')
+      .populate('priceHistory.changedBy', 'firstName lastName email');
+
     if (!product.fromCertifiedOrder) {
       delete updateData.fromCertifiedOrder;
       delete updateData.certifiedOrderSource;
     }
 
-    product = await Product.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('lastPriceChange.changedBy', 'firstName lastName')
-     .populate('priceHistory.changedBy', 'firstName lastName');
-
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
       product: {
-        ...product.toObject(),
-        profitMargin: product.profitMargin,
-        profitPerUnit: product.profitPerUnit,
-        totalProfitPotential: product.totalProfitPotential
+        ...updatedProduct.toObject(),
+        profitMargin: updatedProduct.profitMargin,
+        profitPerUnit: updatedProduct.profitPerUnit,
+        totalProfitPotential: updatedProduct.totalProfitPotential
       }
     });
   } catch (error) {
@@ -404,15 +406,17 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-// Get product price history
+// Enhanced price history with pagination and filtering
 exports.getPriceHistory = async (req, res) => {
   try {
+    const { page = 1, limit = 20, changeType, startDate, endDate } = req.query;
+    
     const product = await Product.findOne({
       _id: req.params.id,
       wholesaler: req.user.id
     })
-    .populate('priceHistory.changedBy', 'firstName lastName')
-    .select('priceHistory name sku');
+    .populate('priceHistory.changedBy', 'firstName lastName email avatar')
+    .select('priceHistory name sku price costPrice priceStatistics');
 
     if (!product) {
       return res.status(404).json({
@@ -421,24 +425,219 @@ exports.getPriceHistory = async (req, res) => {
       });
     }
 
-    // Sort price history by date (newest first)
-    const sortedHistory = product.priceHistory.sort((a, b) => 
+    let filteredHistory = [...product.priceHistory];
+
+    // Apply filters
+    if (changeType) {
+      filteredHistory = filteredHistory.filter(entry => entry.changeType === changeType);
+    }
+
+    if (startDate) {
+      const start = new Date(startDate);
+      filteredHistory = filteredHistory.filter(entry => new Date(entry.changedAt) >= start);
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // End of day
+      filteredHistory = filteredHistory.filter(entry => new Date(entry.changedAt) <= end);
+    }
+
+    // Sort by date (newest first)
+    const sortedHistory = filteredHistory.sort((a, b) => 
       new Date(b.changedAt) - new Date(a.changedAt)
     );
+
+    // Paginate the history
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const paginatedHistory = sortedHistory.slice(startIndex, endIndex);
+
+    // Calculate price change statistics
+    const priceChanges = sortedHistory.map((entry, index) => {
+      if (index < sortedHistory.length - 1) {
+        return {
+          change: entry.sellingPrice - sortedHistory[index + 1].sellingPrice,
+          percentage: ((entry.sellingPrice - sortedHistory[index + 1].sellingPrice) / sortedHistory[index + 1].sellingPrice * 100).toFixed(2)
+        };
+      }
+      return null;
+    }).filter(change => change !== null);
+
+    const totalIncrease = priceChanges.filter(change => change.change > 0).length;
+    const totalDecrease = priceChanges.filter(change => change.change < 0).length;
 
     res.status(200).json({
       success: true,
       product: {
         name: product.name,
         sku: product.sku,
-        currentPrice: product.price
+        currentPrice: product.price,
+        costPrice: product.costPrice,
+        priceStatistics: product.priceStatistics
       },
-      priceHistory: sortedHistory
+      priceHistory: paginatedHistory,
+      historyStats: {
+        totalEntries: sortedHistory.length,
+        totalIncreases: totalIncrease,
+        totalDecreases: totalDecrease,
+        averageChange: priceChanges.length > 0 ? 
+          (priceChanges.reduce((sum, change) => sum + parseFloat(change.percentage), 0) / priceChanges.length).toFixed(2) : 0
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(sortedHistory.length / limit),
+        totalItems: sortedHistory.length,
+        itemsPerPage: parseInt(limit)
+      }
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Error fetching price history',
+      error: error.message
+    });
+  }
+};
+
+// Generate sample price history for existing products
+exports.generateSamplePriceHistory = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { daysBack = 90 } = req.body;
+    
+    const product = await Product.findOne({
+      _id: productId,
+      wholesaler: req.user.id
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Generate sample history using the model method
+    product.generateSamplePriceHistory(req.user.id, parseInt(daysBack));
+    await product.save();
+
+    const updatedProduct = await Product.findById(productId)
+      .populate('priceHistory.changedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Sample price history generated successfully',
+      historyEntries: product.priceHistory.length,
+      product: {
+        name: updatedProduct.name,
+        priceHistory: updatedProduct.priceHistory.sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt)).slice(0, 10)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error generating sample price history',
+      error: error.message
+    });
+  }
+};
+
+// Track price change during sale
+exports.trackSalePriceChange = async (productId, newPrice, userId, saleReference, reason = 'Sale price adjustment') => {
+  try {
+    const product = await Product.findById(productId);
+    
+    if (product && product.price !== newPrice) {
+      product.updatePrice(
+        newPrice, 
+        userId, 
+        reason, 
+        saleReference, 
+        'sale', 
+        `Price changed during sale: ${saleReference}`
+      );
+      await product.save();
+    }
+  } catch (error) {
+    console.error('Error tracking sale price change:', error);
+  }
+};
+
+// Get price analytics for dashboard
+exports.getPriceAnalytics = async (req, res) => {
+  try {
+    const products = await Product.find({
+      wholesaler: req.user.id,
+      isActive: true
+    }).select('name price costPrice priceStatistics priceHistory');
+
+    const analytics = {
+      totalProducts: products.length,
+      productsWithPriceChanges: 0,
+      totalPriceChanges: 0,
+      averagePriceChangesPerProduct: 0,
+      recentlyUpdatedPrices: [],
+      priceChangeTrend: {
+        increases: 0,
+        decreases: 0,
+        stable: 0
+      }
+    };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    products.forEach(product => {
+      if (product.priceStatistics.priceChangeCount > 0) {
+        analytics.productsWithPriceChanges++;
+        analytics.totalPriceChanges += product.priceStatistics.priceChangeCount;
+      }
+
+      // Check recent price changes
+      const recentChanges = product.priceHistory.filter(entry => 
+        new Date(entry.changedAt) > thirtyDaysAgo
+      );
+
+      if (recentChanges.length > 0) {
+        analytics.recentlyUpdatedPrices.push({
+          productName: product.name,
+          changes: recentChanges.length,
+          latestChange: recentChanges[0]
+        });
+      }
+
+      // Analyze price trend
+      if (product.priceHistory.length >= 2) {
+        const latestChange = product.priceHistory[0];
+        const previousChange = product.priceHistory[1];
+        
+        if (latestChange.sellingPrice > previousChange.sellingPrice) {
+          analytics.priceChangeTrend.increases++;
+        } else if (latestChange.sellingPrice < previousChange.sellingPrice) {
+          analytics.priceChangeTrend.decreases++;
+        } else {
+          analytics.priceChangeTrend.stable++;
+        }
+      }
+    });
+
+    analytics.averagePriceChangesPerProduct = analytics.totalProducts > 0 ? 
+      (analytics.totalPriceChanges / analytics.totalProducts).toFixed(1) : 0;
+
+    // Sort recently updated by most recent
+    analytics.recentlyUpdatedPrices.sort((a, b) => 
+      new Date(b.latestChange.changedAt) - new Date(a.latestChange.changedAt)
+    ).slice(0, 10); // Top 10 most recent
+
+    res.status(200).json({
+      success: true,
+      analytics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching price analytics',
       error: error.message
     });
   }
@@ -459,7 +658,6 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-    // Delete images from Cloudinary
     if (product.images && product.images.length > 0) {
       const deletePromises = product.images.map(image => {
         return cloudinary.uploader.destroy(image.publicId);
@@ -483,7 +681,7 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-// Get product categories for a wholesaler
+// Get product categories
 exports.getCategories = async (req, res) => {
   try {
     const categories = await Product.distinct('category', {
@@ -529,10 +727,7 @@ exports.deleteProductImage = async (req, res) => {
       });
     }
 
-    // Delete from Cloudinary
     await cloudinary.uploader.destroy(imageToDelete.publicId);
-
-    // Remove from product
     product.images.pull(imageId);
     await product.save();
 
@@ -549,7 +744,7 @@ exports.deleteProductImage = async (req, res) => {
   }
 };
 
-// Get profit analytics for wholesaler
+// Get profit analytics
 exports.getProfitAnalytics = async (req, res) => {
   try {
     const products = await Product.find({
@@ -565,7 +760,8 @@ exports.getProfitAnalytics = async (req, res) => {
       averageProfitMargin: 0,
       lowStockProducts: 0,
       outOfStockProducts: 0,
-      productsWithEditedPrices: 0
+      productsWithEditedPrices: 0,
+      productsWithPriceHistory: 0
     };
 
     products.forEach(product => {
@@ -585,14 +781,18 @@ exports.getProfitAnalytics = async (req, res) => {
         analytics.outOfStockProducts++;
       }
 
-      // NEW: Count products with manually edited prices
       if (product.priceManuallyEdited) {
         analytics.productsWithEditedPrices++;
+      }
+
+      if (product.priceHistory.length > 1) {
+        analytics.productsWithPriceHistory++;
       }
     });
 
     if (products.length > 0) {
-      analytics.averageProfitMargin = (analytics.totalPotentialProfit / analytics.totalInvestment) * 100;
+      analytics.averageProfitMargin = analytics.totalInvestment > 0 ? 
+        (analytics.totalPotentialProfit / analytics.totalInvestment) * 100 : 0;
     }
 
     res.status(200).json({

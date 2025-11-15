@@ -63,6 +63,8 @@ exports.getProducts = async (req, res) => {
 
     const products = await Product.find(filter)
       .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
+      .populate('lastPriceChange.changedBy', 'firstName lastName')
+      .populate('priceHistory.changedBy', 'firstName lastName')
       .sort({ fromCertifiedOrder: 1, createdAt: -1 }) // Regular products first, then certified
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -137,14 +139,16 @@ exports.getProductsForRetailers = async (req, res) => {
   }
 };
 
-// Get single product
+// Get single product with price history
 exports.getProduct = async (req, res) => {
   try {
     const product = await Product.findOne({
       _id: req.params.id,
       wholesaler: req.user.id
     })
-    .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName');
+    .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
+    .populate('lastPriceChange.changedBy', 'firstName lastName')
+    .populate('priceHistory.changedBy', 'firstName lastName');
 
     if (!product) {
       return res.status(404).json({
@@ -194,7 +198,14 @@ exports.createProduct = async (req, res) => {
       images: imageUrls,
       fromCertifiedOrder: false, // Ensure manually created products are not marked as certified
       priceManuallyEdited: false,
-      originalSellingPrice: parseFloat(req.body.price) // Set initial selling price as original
+      originalSellingPrice: parseFloat(req.body.price), // Set initial selling price as original
+      // Initialize price history with the initial price
+      priceHistory: [{
+        sellingPrice: parseFloat(req.body.price),
+        costPrice: parseFloat(req.body.costPrice),
+        changedBy: req.user.id,
+        reason: 'Initial price'
+      }]
     };
 
     // Validate that selling price is not below cost price
@@ -222,6 +233,63 @@ exports.createProduct = async (req, res) => {
     res.status(400).json({
       success: false,
       message: 'Error creating product',
+      error: error.message
+    });
+  }
+};
+
+// Update product price with history tracking
+exports.updateProductPrice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPrice, reason = 'Price adjustment', saleReference = null } = req.body;
+
+    const product = await Product.findOne({
+      _id: id,
+      wholesaler: req.user.id
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    const newSellingPrice = parseFloat(newPrice);
+    const costPrice = parseFloat(product.costPrice);
+
+    // Validate that selling price is not below cost price
+    if (newSellingPrice < costPrice) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selling price cannot be less than cost price'
+      });
+    }
+
+    // Use the schema method to update price with history tracking
+    product.updatePrice(newSellingPrice, req.user.id, reason, saleReference);
+    await product.save();
+
+    // Populate the updated product
+    const updatedProduct = await Product.findById(id)
+      .populate('lastPriceChange.changedBy', 'firstName lastName')
+      .populate('priceHistory.changedBy', 'firstName lastName');
+
+    res.status(200).json({
+      success: true,
+      message: 'Product price updated successfully',
+      product: updatedProduct,
+      priceChange: {
+        previousPrice: product.lastPriceChange.previousPrice,
+        newPrice: newSellingPrice,
+        change: newSellingPrice - product.lastPriceChange.previousPrice
+      }
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: 'Error updating product price',
       error: error.message
     });
   }
@@ -277,10 +345,28 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // NEW: Track price editing
+    // NEW: Track price editing and add to history if price changed
     if (newSellingPrice !== product.price) {
+      // Add current price to history before updating
+      product.priceHistory.push({
+        sellingPrice: product.price,
+        costPrice: product.costPrice,
+        changedAt: new Date(),
+        changedBy: req.user.id,
+        reason: 'Price update'
+      });
+
+      // Update last price change info
+      updateData.lastPriceChange = {
+        previousPrice: product.price,
+        changedAt: new Date(),
+        changedBy: req.user.id,
+        reason: 'Price update'
+      };
+
       updateData.priceManuallyEdited = true;
-      // Store original selling price if this is the first edit
+      
+      // Set original selling price if this is the first edit
       if (!product.originalSellingPrice) {
         updateData.originalSellingPrice = product.price;
       }
@@ -296,7 +382,8 @@ exports.updateProduct = async (req, res) => {
       req.params.id,
       updateData,
       { new: true, runValidators: true }
-    );
+    ).populate('lastPriceChange.changedBy', 'firstName lastName')
+     .populate('priceHistory.changedBy', 'firstName lastName');
 
     res.status(200).json({
       success: true,
@@ -312,6 +399,46 @@ exports.updateProduct = async (req, res) => {
     res.status(400).json({
       success: false,
       message: 'Error updating product',
+      error: error.message
+    });
+  }
+};
+
+// Get product price history
+exports.getPriceHistory = async (req, res) => {
+  try {
+    const product = await Product.findOne({
+      _id: req.params.id,
+      wholesaler: req.user.id
+    })
+    .populate('priceHistory.changedBy', 'firstName lastName')
+    .select('priceHistory name sku');
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Sort price history by date (newest first)
+    const sortedHistory = product.priceHistory.sort((a, b) => 
+      new Date(b.changedAt) - new Date(a.changedAt)
+    );
+
+    res.status(200).json({
+      success: true,
+      product: {
+        name: product.name,
+        sku: product.sku,
+        currentPrice: product.price
+      },
+      priceHistory: sortedHistory
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching price history',
       error: error.message
     });
   }

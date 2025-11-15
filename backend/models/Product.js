@@ -25,6 +25,33 @@ const imageSchema = new mongoose.Schema({
   }
 });
 
+// Price history schema to track price changes
+const priceHistorySchema = new mongoose.Schema({
+  sellingPrice: {
+    type: Number,
+    required: true
+  },
+  costPrice: {
+    type: Number,
+    required: true
+  },
+  changedAt: {
+    type: Date,
+    default: Date.now
+  },
+  changedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  reason: {
+    type: String,
+    default: 'Price adjustment'
+  },
+  saleReference: {
+    type: String
+  }
+});
+
 const productSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -146,6 +173,18 @@ const productSchema = new mongoose.Schema({
   originalSellingPrice: {
     type: Number,
     min: 0
+  },
+  // Price history to track all price changes
+  priceHistory: [priceHistorySchema],
+  // Last price change information
+  lastPriceChange: {
+    previousPrice: Number,
+    changedAt: Date,
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    reason: String
   }
 }, {
   timestamps: true
@@ -199,6 +238,36 @@ productSchema.methods.checkLowStock = function() {
   return this.lowStockAlert;
 };
 
+// Method to update price with history tracking
+productSchema.methods.updatePrice = function(newPrice, userId, reason = 'Price adjustment', saleReference = null) {
+  // Add current price to history before updating
+  this.priceHistory.push({
+    sellingPrice: this.price,
+    costPrice: this.costPrice,
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    saleReference: saleReference
+  });
+
+  // Update last price change info
+  this.lastPriceChange = {
+    previousPrice: this.price,
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason
+  };
+
+  // Update current price
+  this.price = newPrice;
+  this.priceManuallyEdited = true;
+
+  // Set original selling price if not set
+  if (!this.originalSellingPrice) {
+    this.originalSellingPrice = this.lastPriceChange.previousPrice;
+  }
+};
+
 // Pre-save middleware to check low stock and set original stock quantity
 productSchema.pre('save', function(next) {
   // Set original stock quantity when product is first created
@@ -235,5 +304,6 @@ productSchema.index({ lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, lowStockAlert: 1 });
 productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
 productSchema.index({ isActive: 1 });
+productSchema.index({ 'priceHistory.changedAt': -1 });
 
 module.exports = mongoose.model('Product', productSchema);

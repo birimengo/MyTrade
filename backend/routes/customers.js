@@ -1,41 +1,35 @@
 const express = require('express');
 const auth = require('../middleware/auth');
-const User = require('../models/User');
-const Customer = require('../models/Customer'); // Optional: if you want separate customer model
+const User = require('../models/User'); // Change this from Customer to User
 
 const router = express.Router();
 
-// GET /api/customers - Get all customers for wholesaler
+// GET /api/customers - Get customers for wholesaler (retailers)
 router.get('/', auth, async (req, res) => {
   try {
     const { page = 1, limit = 10, search } = req.query;
     
-    // For now, we'll use retailers as customers
+    // Find retailers who could be customers
     const filter = { 
       role: 'retailer',
-      // If you have a relationship field, add it here
-      // wholesaler: req.user.id 
+      $or: [
+        { businessName: { $regex: search || '', $options: 'i' } },
+        { firstName: { $regex: search || '', $options: 'i' } },
+        { lastName: { $regex: search || '', $options: 'i' } },
+        { email: { $regex: search || '', $options: 'i' } },
+        { phone: { $regex: search || '', $options: 'i' } }
+      ]
     };
-    
-    if (search) {
-      filter.$or = [
-        { businessName: { $regex: search, $options: 'i' } },
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
-      ];
-    }
 
     const customers = await User.find(filter)
-      .select('businessName firstName lastName phone email address role createdAt')
+      .select('businessName firstName lastName email phone address createdAt')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
     const total = await User.countDocuments(filter);
 
-    // Format response to match expected structure
+    // Format customers for the frontend
     const formattedCustomers = customers.map(customer => ({
       _id: customer._id,
       id: customer._id,
@@ -65,46 +59,42 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// POST /api/customers - Create new customer
-router.post('/', auth, async (req, res) => {
+// GET /api/customers/:id - Get single customer
+router.get('/:id', auth, async (req, res) => {
   try {
-    const { name, phone, email, address, businessName } = req.body;
+    const customer = await User.findOne({
+      _id: req.params.id,
+      role: 'retailer'
+    }).select('businessName firstName lastName email phone address createdAt');
 
-    // Create a new retailer user for the customer
-    const customer = new User({
-      firstName: name.split(' ')[0] || name,
-      lastName: name.split(' ').slice(1).join(' ') || name,
-      businessName: businessName || name,
-      phone,
-      email: email || `${phone}@customer.com`,
-      address,
-      role: 'retailer',
-      password: 'temp123', // Set a temporary password
-      isVerified: true
-    });
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
 
-    await customer.save();
+    const formattedCustomer = {
+      _id: customer._id,
+      id: customer._id,
+      name: customer.businessName || `${customer.firstName} ${customer.lastName}`,
+      email: customer.email,
+      phone: customer.phone,
+      address: customer.address,
+      businessName: customer.businessName,
+      type: 'retailer',
+      createdAt: customer.createdAt
+    };
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
-      message: 'Customer created successfully',
-      customer: {
-        _id: customer._id,
-        id: customer._id,
-        name: customer.businessName || `${customer.firstName} ${customer.lastName}`,
-        email: customer.email,
-        phone: customer.phone,
-        address: customer.address,
-        businessName: customer.businessName,
-        type: 'retailer',
-        createdAt: customer.createdAt
-      }
+      customer: formattedCustomer
     });
   } catch (error) {
-    console.error('Error creating customer:', error);
-    res.status(400).json({
+    console.error('Error fetching customer:', error);
+    res.status(500).json({
       success: false,
-      message: 'Error creating customer',
+      message: 'Error fetching customer',
       error: error.message
     });
   }

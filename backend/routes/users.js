@@ -6,6 +6,62 @@ const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
+// ==============================================
+// NEW ENDPOINT: Get retailers for BMS compatibility
+// ==============================================
+
+// GET /api/users/retailers - Get all retailers (for BMS compatibility)
+router.get('/retailers', protect, async (req, res) => {
+  try {
+    const { page = 1, limit = 100, search } = req.query;
+    
+    // Find retailers
+    const filter = { 
+      role: 'retailer',
+      isActive: true
+    };
+    
+    // Add search filter if provided
+    if (search) {
+      filter.$or = [
+        { businessName: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const retailers = await User.find(filter)
+      .select('businessName firstName lastName email phone address createdAt isActive')
+      .sort({ businessName: 1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await User.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      users: retailers,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total,
+      count: retailers.length
+    });
+  } catch (error) {
+    console.error('Error fetching retailers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching retailers',
+      error: error.message
+    });
+  }
+});
+
+// ==============================================
+// EXISTING ENDPOINTS (UNCHANGED)
+// ==============================================
+
 // Get suppliers by product category
 router.get('/suppliers', protect, async (req, res) => {
   try {

@@ -137,6 +137,15 @@ const productSchema = new mongoose.Schema({
     certifiedAt: {
       type: Date
     }
+  },
+  // NEW FIELDS FOR PRICE EDITING TRACKING
+  priceManuallyEdited: {
+    type: Boolean,
+    default: false
+  },
+  originalSellingPrice: {
+    type: Number,
+    min: 0
   }
 }, {
   timestamps: true
@@ -203,6 +212,15 @@ productSchema.pre('save', function(next) {
     this.lastStockUpdate = new Date();
   }
   
+  next();
+});
+
+// Pre-save middleware to validate selling price is not below cost price
+productSchema.pre('save', function(next) {
+  if (this.price < this.costPrice) {
+    const error = new Error('Selling price cannot be less than cost price');
+    return next(error);
+  }
   next();
 });
 

@@ -1,4 +1,3 @@
-// controllers/productController.js
 const Product = require('../models/Product');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
@@ -186,21 +185,23 @@ exports.createProduct = async (req, res) => {
       ...req.body,
       wholesaler: req.user.id,
       price: parseFloat(req.body.price),
-      costPrice: parseFloat(req.body.costPrice), // ADDED: Cost price field
+      costPrice: parseFloat(req.body.costPrice),
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
       discountPercentage: req.body.discountPercentage ? parseFloat(req.body.discountPercentage) : 0,
       tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
       images: imageUrls,
-      fromCertifiedOrder: false // Ensure manually created products are not marked as certified
+      fromCertifiedOrder: false, // Ensure manually created products are not marked as certified
+      priceManuallyEdited: false,
+      originalSellingPrice: parseFloat(req.body.price) // Set initial selling price as original
     };
 
-    // Validate that cost price is less than selling price
-    if (productData.costPrice >= productData.price) {
+    // Validate that selling price is not below cost price
+    if (productData.price < productData.costPrice) {
       return res.status(400).json({
         success: false,
-        message: 'Cost price must be less than selling price'
+        message: 'Selling price cannot be less than cost price'
       });
     }
 
@@ -256,7 +257,7 @@ exports.updateProduct = async (req, res) => {
     const updateData = {
       ...req.body,
       price: parseFloat(req.body.price),
-      costPrice: parseFloat(req.body.costPrice), // ADDED: Cost price field
+      costPrice: parseFloat(req.body.costPrice),
       quantity: parseInt(req.body.quantity),
       minOrderQuantity: parseInt(req.body.minOrderQuantity) || 1,
       bulkDiscount: req.body.bulkDiscount === 'true',
@@ -265,12 +266,24 @@ exports.updateProduct = async (req, res) => {
       images: imageUrls
     };
 
-    // Validate that cost price is less than selling price
-    if (updateData.costPrice >= updateData.price) {
+    // NEW: Validate that selling price is not below cost price
+    const newSellingPrice = parseFloat(req.body.price);
+    const costPrice = parseFloat(req.body.costPrice);
+    
+    if (newSellingPrice < costPrice) {
       return res.status(400).json({
         success: false,
-        message: 'Cost price must be less than selling price'
+        message: 'Selling price cannot be less than cost price'
       });
+    }
+
+    // NEW: Track price editing
+    if (newSellingPrice !== product.price) {
+      updateData.priceManuallyEdited = true;
+      // Store original selling price if this is the first edit
+      if (!product.originalSellingPrice) {
+        updateData.originalSellingPrice = product.price;
+      }
     }
 
     // Prevent updating certified order source for manually created products
@@ -424,7 +437,8 @@ exports.getProfitAnalytics = async (req, res) => {
       totalPotentialProfit: 0,
       averageProfitMargin: 0,
       lowStockProducts: 0,
-      outOfStockProducts: 0
+      outOfStockProducts: 0,
+      productsWithEditedPrices: 0
     };
 
     products.forEach(product => {
@@ -442,6 +456,11 @@ exports.getProfitAnalytics = async (req, res) => {
 
       if (product.quantity === 0) {
         analytics.outOfStockProducts++;
+      }
+
+      // NEW: Count products with manually edited prices
+      if (product.priceManuallyEdited) {
+        analytics.productsWithEditedPrices++;
       }
     });
 

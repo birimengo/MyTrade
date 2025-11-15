@@ -38,8 +38,10 @@ const supplierProductsRoutes = require('./routes/supplierProducts');
 const wholesalerOrdersRoutes = require('./routes/wholesalerOrdersToSupplierRoute');
 const supplierReceiptRoutes = require('./routes/supplierReceiptRoute');
 const certifiedProductsRoutes = require('./routes/certifiedProducts');
-const customerRoutes = require('./routes/customers');
+
 const wholesaleSalesRoutes = require('./routes/wholesaleSales');
+const customerRoutes = require('./routes/customers');
+
 // Import password reset routes
 const authControllerRoutes = require('./routes/authController');
 
@@ -202,9 +204,8 @@ app.use('/api/supplier-receipts', supplierReceiptRoutes);
 app.use('/api/certified-products', certifiedProductsRoutes);
 app.use('/api/system-stocks', systemStockRoutes);
 app.use('/api/retailer-stocks', retailerStockRoutes);
-app.use('/api/customers', customerRoutes);
-
 app.use('/api/wholesale-sales', wholesaleSalesRoutes);
+app.use('/api/customers', customerRoutes);
 
 // NEW: React Native specific endpoints
 

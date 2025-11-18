@@ -33,97 +33,10 @@ const uploadToCloudinary = async (file, userId) => {
   }
 };
 
-// Helper function to get system stock products
-const getSystemStockProducts = async (wholesalerId, category, search) => {
-  try {
-    const SystemStock = require('../models/SystemStock');
-    
-    const filter = { 
-      retailer: wholesalerId,
-      quantity: { $gt: 0 } // Only include items with available stock
-    };
-    
-    if (category && category !== 'all') {
-      filter.category = category;
-    }
-    
-    if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const systemStocks = await SystemStock.find(filter)
-      .populate('product', 'name description images category tags measurementUnit')
-      .populate('order', 'orderNumber status')
-      .sort({ createdAt: -1 });
-
-    // Convert system stocks to product format for consistent frontend handling
-    const systemStockProducts = systemStocks.map(stock => {
-      const baseProduct = stock.product || {};
-      return {
-        _id: `system_stock_${stock._id}`, // Prefix to avoid ID conflicts
-        id: `system_stock_${stock._id}`,
-        name: stock.name || baseProduct.name,
-        description: baseProduct.description || `Stock from order ${stock.order?.orderNumber || 'N/A'}`,
-        price: stock.unitPrice,
-        costPrice: stock.unitPrice, // For system stock, cost = selling price initially
-        quantity: stock.quantity,
-        measurementUnit: stock.measurementUnit || baseProduct.measurementUnit,
-        category: stock.category || baseProduct.category,
-        images: baseProduct.images || [],
-        tags: baseProduct.tags || ['system-stock'],
-        wholesaler: stock.retailer,
-        isActive: true,
-        fromSystemStock: true,
-        systemStockId: stock._id,
-        originalProductId: stock.product?._id,
-        orderId: stock.order?._id,
-        orderNumber: stock.order?.orderNumber,
-        // Additional fields for identification and UI handling
-        source: 'system_stock',
-        stockType: 'system_stock',
-        createdAt: stock.createdAt,
-        updatedAt: stock.updatedAt,
-        // Price history for system stock (simplified)
-        priceHistory: [{
-          sellingPrice: stock.unitPrice,
-          costPrice: stock.unitPrice,
-          changedBy: 'system',
-          reason: 'System stock allocation',
-          changeType: 'system',
-          changedAt: stock.createdAt
-        }],
-        lastPriceChange: {
-          previousPrice: stock.unitPrice,
-          newPrice: stock.unitPrice,
-          changedBy: 'system',
-          reason: 'System stock allocation',
-          changeType: 'system',
-          changedAt: stock.createdAt
-        }
-      };
-    });
-
-    return systemStockProducts;
-  } catch (error) {
-    console.error('Error fetching system stock products:', error);
-    return []; // Return empty array on error to prevent breaking the main flow
-  }
-};
-
-// Get all products for a wholesaler with system stock integration
+// Get all products for a wholesaler
 exports.getProducts = async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      category, 
-      search, 
-      includeCertified = true, 
-      includeSystemStock = true 
-    } = req.query;
+    const { page = 1, limit = 10, category, search, includeCertified = true } = req.query;
     
     const filter = { 
       wholesaler: req.user.id,
@@ -146,7 +59,6 @@ exports.getProducts = async (req, res) => {
       ];
     }
 
-    // Get main products with pagination
     const products = await Product.find(filter)
       .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
       .populate('lastPriceChange.changedBy', 'firstName lastName email')
@@ -157,32 +69,12 @@ exports.getProducts = async (req, res) => {
 
     const total = await Product.countDocuments(filter);
 
-    // Initialize variables for system stock integration
-    let allProducts = [...products];
-    let systemStockProducts = [];
-    let systemStockCount = 0;
-
-    // If including system stock, fetch and merge
-    if (includeSystemStock === 'true') {
-      systemStockProducts = await getSystemStockProducts(req.user.id, category, search);
-      systemStockCount = systemStockProducts.length;
-      allProducts = [...products, ...systemStockProducts];
-    }
-
-    // Calculate pagination for combined results
-    const totalCombined = total + systemStockCount;
-    const totalPages = Math.ceil(total / limit); // Pagination based on main products only
-
     res.status(200).json({
       success: true,
-      products: allProducts,
-      systemStockProducts: systemStockCount,
-      totalProducts: products.length, // Main products count
-      totalCombinedProducts: allProducts.length, // Total including system stock
-      totalPages: totalPages,
-      currentPage: parseInt(page),
-      total: total,
-      hasSystemStock: systemStockCount > 0
+      products,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total
     });
   } catch (error) {
     res.status(500).json({

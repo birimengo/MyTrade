@@ -98,6 +98,11 @@ router.get('/:id', auth, async (req, res) => {
 // POST /api/wholesale-sales - Create new wholesale sale
 router.post('/', auth, async (req, res) => {
   try {
+    // ✅ ADD DEBUG LOGS TO SEE WHAT'S BEING RECEIVED
+    console.log('📥 BACKEND - Received sale data:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 BACKEND - Reference number received:', req.body.referenceNumber);
+    console.log('🔍 BACKEND - Has referenceNumber:', !!req.body.referenceNumber);
+    
     const {
       customerType,
       customerId,
@@ -113,8 +118,21 @@ router.post('/', auth, async (req, res) => {
       totalDiscount,
       grandTotal,
       amountPaid,
-      balanceDue
+      balanceDue,
+      referenceNumber // ✅ CRITICAL FIX: ADD referenceNumber TO DESTRUCTURING
     } = req.body;
+
+    // ✅ VALIDATE referenceNumber EXISTS
+    if (!referenceNumber) {
+      console.error('❌ BACKEND - referenceNumber is missing after destructuring!');
+      return res.status(400).json({
+        success: false,
+        message: 'Reference number is required',
+        error: 'WholesaleSale validation failed: referenceNumber: Path `referenceNumber` is required.'
+      });
+    }
+
+    console.log('✅ BACKEND - referenceNumber after destructuring:', referenceNumber);
 
     // Validate required fields
     if (!customerName || !items || items.length === 0) {
@@ -195,11 +213,13 @@ router.post('/', auth, async (req, res) => {
       await product.save();
     }
 
+    // ✅ CRITICAL FIX: INCLUDE referenceNumber IN saleData
     const saleData = {
       customerType,
       customerId: finalCustomerId,
       customerInfo: customerType === 'new' ? customerInfo : undefined,
       ...customerDetails,
+      referenceNumber, // ✅ ADD THIS - WAS MISSING!
       saleDate: saleDate || new Date(),
       saleTime,
       paymentMethod,
@@ -213,6 +233,8 @@ router.post('/', auth, async (req, res) => {
       balanceDue,
       wholesaler: req.user.id
     };
+
+    console.log('✅ BACKEND - Final saleData with referenceNumber:', saleData.referenceNumber);
 
     const wholesaleSale = new WholesaleSale(saleData);
     await wholesaleSale.save();
@@ -234,7 +256,7 @@ router.post('/', auth, async (req, res) => {
       wholesaleSale: saleWithCustomerDetails
     });
   } catch (error) {
-    console.error('Error creating wholesale sale:', error);
+    console.error('❌ BACKEND - Error creating wholesale sale:', error);
     res.status(400).json({
       success: false,
       message: 'Error creating wholesale sale',

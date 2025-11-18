@@ -377,6 +377,309 @@ productSchema.methods.generateSamplePriceHistory = function(userId, daysBack = 9
   }
 };
 
+// ==================== CERTIFIED ORDER METHODS ====================
+
+// Method to create products from certified orders
+productSchema.statics.createFromCertifiedOrder = async function(order, wholesalerId) {
+  try {
+    const products = [];
+    const SupplierProduct = mongoose.model('SupplierProduct');
+    
+    for (const orderItem of order.items) {
+      const supplierProduct = await SupplierProduct
+        .findById(orderItem.product)
+        .populate('supplier', 'businessName firstName lastName');
+
+      if (!supplierProduct) {
+        console.log(`Supplier product not found: ${orderItem.product}`);
+        continue;
+      }
+
+      // Generate unique SKU for the certified product
+      const certifiedSku = `CERT-${order.orderNumber}-${supplierProduct.sku || supplierProduct._id.toString().slice(-6)}`;
+      
+      // Check if product already exists from this certified order
+      const existingProduct = await this.findOne({
+        sku: certifiedSku,
+        wholesaler: wholesalerId
+      });
+
+      if (existingProduct) {
+        console.log(`Certified product already exists: ${certifiedSku}`);
+        // Update quantity if product already exists
+        existingProduct.quantity += orderItem.quantity;
+        await existingProduct.save();
+        products.push(existingProduct);
+        continue;
+      }
+
+      // Create new certified product
+      const productData = {
+        name: supplierProduct.name,
+        description: supplierProduct.description || `Certified product from ${supplierProduct.supplier?.businessName || 'supplier'}`,
+        price: supplierProduct.sellingPrice,
+        costPrice: supplierProduct.sellingPrice, // Cost is what wholesaler paid
+        quantity: orderItem.quantity,
+        measurementUnit: supplierProduct.measurementUnit || 'units',
+        category: supplierProduct.category || 'Certified Products',
+        images: supplierProduct.images || [],
+        tags: ['certified', 'supplier-order', ...(supplierProduct.tags || [])],
+        wholesaler: wholesalerId,
+        sku: certifiedSku,
+        fromCertifiedOrder: true,
+        certifiedOrderSource: {
+          orderId: order._id,
+          supplierId: supplierProduct.supplier?._id,
+          certifiedAt: new Date()
+        },
+        priceHistory: [{
+          sellingPrice: supplierProduct.sellingPrice,
+          costPrice: supplierProduct.sellingPrice,
+          changedBy: wholesalerId,
+          reason: 'Initial price from certified order',
+          changeType: 'initial'
+        }],
+        priceStatistics: {
+          highestPrice: supplierProduct.sellingPrice,
+          lowestPrice: supplierProduct.sellingPrice,
+          averagePrice: supplierProduct.sellingPrice,
+          priceChangeCount: 1
+        }
+      };
+
+      const product = new this(productData);
+      await product.save();
+      products.push(product);
+      console.log(`Created certified product: ${product.name} (SKU: ${product.sku})`);
+    }
+
+    return products;
+  } catch (error) {
+    console.error('Error creating products from certified order:', error);
+    throw error;
+  }
+};
+
+// Method to update stock from certified orders
+productSchema.statics.updateStockFromCertifiedOrder = async function(orderId, wholesalerId) {
+  try {
+    const WholesalerOrderToSupplier = mongoose.model('WholesalerOrderToSupplier');
+    const order = await WholesalerOrderToSupplier
+      .findById(orderId)
+      .populate('items.product');
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    if (order.status !== 'certified') {
+      throw new Error('Order is not certified');
+    }
+
+    const updatedProducts = [];
+
+    for (const orderItem of order.items) {
+      if (!orderItem.product) {
+        console.log(`Order item product not populated: ${orderItem._id}`);
+        continue;
+      }
+
+      const certifiedSku = `CERT-${order.orderNumber}-${orderItem.product.sku || orderItem.product._id.toString().slice(-6)}`;
+      
+      // Find the certified product
+      const product = await this.findOne({
+        sku: certifiedSku,
+        wholesaler: wholesalerId
+      });
+
+      if (product) {
+        // Update quantity - add the ordered quantity
+        const oldQuantity = product.quantity;
+        product.quantity += orderItem.quantity;
+        await product.save();
+        updatedProducts.push({
+          product: product,
+          oldQuantity: oldQuantity,
+          newQuantity: product.quantity,
+          added: orderItem.quantity
+        });
+        console.log(`Updated stock for ${product.name}: ${oldQuantity} -> ${product.quantity}`);
+      } else {
+        console.log(`Certified product not found: ${certifiedSku}`);
+      }
+    }
+
+    return updatedProducts;
+  } catch (error) {
+    console.error('Error updating stock from certified order:', error);
+    throw error;
+  }
+};
+
+// Method to get certified products for a wholesaler
+productSchema.statics.getCertifiedProducts = async function(wholesalerId, options = {}) {
+  const { page = 1, limit = 10, search = '' } = options;
+  
+  const filter = {
+    wholesaler: wholesalerId,
+    fromCertifiedOrder: true,
+    isActive: true
+  };
+
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } },
+      { sku: { $regex: search, $options: 'i' } },
+      { category: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  const products = await this.find(filter)
+    .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName email phone')
+    .populate('certifiedOrderSource.orderId', 'orderNumber createdAt deliveredAt totalAmount')
+    .sort({ createdAt: -1 })
+    .limit(limit * 1)
+    .skip((page - 1) * limit);
+
+  const total = await this.countDocuments(filter);
+
+  return {
+    products,
+    totalPages: Math.ceil(total / limit),
+    currentPage: parseInt(page),
+    total
+  };
+};
+
+// Method to check if order can be certified (all items available)
+productSchema.statics.canCertifyOrder = async function(orderId, wholesalerId) {
+  try {
+    const WholesalerOrderToSupplier = mongoose.model('WholesalerOrderToSupplier');
+    const order = await WholesalerOrderToSupplier
+      .findOne({
+        _id: orderId,
+        wholesaler: wholesalerId,
+        status: 'delivered'
+      })
+      .populate('items.product');
+
+    if (!order) {
+      return { canCertify: false, reason: 'Order not found or not delivered' };
+    }
+
+    const issues = [];
+
+    for (const orderItem of order.items) {
+      if (!orderItem.product) {
+        issues.push(`Product not found for item: ${orderItem._id}`);
+        continue;
+      }
+
+      if (!orderItem.product.isActive) {
+        issues.push(`Product ${orderItem.product.name} is not active`);
+      }
+
+      // Check if product quantity is sufficient (for stock validation)
+      if (orderItem.product.quantity < orderItem.quantity) {
+        issues.push(`Insufficient stock for ${orderItem.product.name}. Available: ${orderItem.product.quantity}, Ordered: ${orderItem.quantity}`);
+      }
+    }
+
+    return {
+      canCertify: issues.length === 0,
+      issues: issues,
+      order: order
+    };
+  } catch (error) {
+    console.error('Error checking order certification:', error);
+    return { canCertify: false, reason: error.message };
+  }
+};
+
+// Method to get products by certified order
+productSchema.statics.getProductsByCertifiedOrder = async function(orderId, wholesalerId) {
+  return await this.find({
+    wholesaler: wholesalerId,
+    'certifiedOrderSource.orderId': orderId,
+    fromCertifiedOrder: true
+  })
+  .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
+  .sort({ createdAt: -1 });
+};
+
+// Method to update certified product price with tracking
+productSchema.methods.updateCertifiedProductPrice = function(newPrice, userId, reason = 'Price adjustment', note = '') {
+  const oldPrice = this.price;
+  
+  // Only update if price changed
+  if (parseFloat(newPrice) !== oldPrice) {
+    this.updatePrice(newPrice, userId, reason, null, 'manual', note);
+    
+    // Additional certified product specific tracking
+    if (this.certifiedOrderSource) {
+      console.log(`Certified product price updated: ${this.name} from ${oldPrice} to ${newPrice}`);
+    }
+  }
+};
+
+// Method to get certified product analytics
+productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId) {
+  const certifiedProducts = await this.find({
+    wholesaler: wholesalerId,
+    fromCertifiedOrder: true,
+    isActive: true
+  });
+
+  const analytics = {
+    totalCertifiedProducts: certifiedProducts.length,
+    totalInvestment: 0,
+    totalPotentialRevenue: 0,
+    totalPotentialProfit: 0,
+    lowStockCertifiedProducts: 0,
+    outOfStockCertifiedProducts: 0,
+    certifiedProductsBySupplier: {},
+    averageProfitMargin: 0
+  };
+
+  certifiedProducts.forEach(product => {
+    const investment = product.costPrice * product.quantity;
+    const potentialRevenue = product.price * product.quantity;
+    const potentialProfit = potentialRevenue - investment;
+
+    analytics.totalInvestment += investment;
+    analytics.totalPotentialRevenue += potentialRevenue;
+    analytics.totalPotentialProfit += potentialProfit;
+
+    if (product.lowStockAlert) {
+      analytics.lowStockCertifiedProducts++;
+    }
+
+    if (product.quantity === 0) {
+      analytics.outOfStockCertifiedProducts++;
+    }
+
+    // Group by supplier
+    const supplierId = product.certifiedOrderSource?.supplierId?.toString() || 'unknown';
+    if (!analytics.certifiedProductsBySupplier[supplierId]) {
+      analytics.certifiedProductsBySupplier[supplierId] = {
+        count: 0,
+        supplierName: product.certifiedOrderSource?.supplierId?.businessName || 'Unknown Supplier'
+      };
+    }
+    analytics.certifiedProductsBySupplier[supplierId].count++;
+  });
+
+  if (certifiedProducts.length > 0) {
+    analytics.averageProfitMargin = analytics.totalInvestment > 0 ? 
+      (analytics.totalPotentialProfit / analytics.totalInvestment) * 100 : 0;
+  }
+
+  return analytics;
+};
+
+// ==================== END CERTIFIED ORDER METHODS ====================
+
 // Pre-save middleware
 productSchema.pre('save', function(next) {
   // Set original stock quantity when product is first created
@@ -400,6 +703,11 @@ productSchema.pre('save', function(next) {
   // Update price statistics when price changes
   if (this.isModified('price') && this.priceHistory.length > 0) {
     this.updatePriceStatistics();
+  }
+
+  // Set certified order source timestamp if not set
+  if (this.fromCertifiedOrder && this.certifiedOrderSource && !this.certifiedOrderSource.certifiedAt) {
+    this.certifiedOrderSource.certifiedAt = new Date();
   }
   
   next();
@@ -427,5 +735,7 @@ productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ 'priceHistory.changedAt': -1 });
 productSchema.index({ 'priceStatistics.priceChangeCount': -1 });
+productSchema.index({ 'certifiedOrderSource.orderId': 1 });
+productSchema.index({ 'certifiedOrderSource.supplierId': 1 });
 
 module.exports = mongoose.model('Product', productSchema);

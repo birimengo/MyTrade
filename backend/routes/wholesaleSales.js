@@ -7,10 +7,22 @@ const User = require('../models/User'); // For existing customers
 
 const router = express.Router();
 
-// GET /api/wholesale-sales - Get all wholesale sales for wholesaler
+// GET /api/wholesale-sales - Get all wholesale sales for wholesaler with enhanced filtering
 router.get('/', auth, async (req, res) => {
   try {
-    const { page = 1, limit = 10, startDate, endDate, customerId, status } = req.query;
+    const { 
+      page = 1, 
+      limit = 10, 
+      startDate, 
+      endDate, 
+      customerId, 
+      status,
+      paymentMethod,
+      paymentStatus,
+      search,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
     
     const filter = { wholesaler: req.user.id };
     
@@ -31,27 +43,246 @@ router.get('/', auth, async (req, res) => {
       filter.status = status;
     }
 
+    // Payment method filter
+    if (paymentMethod) {
+      filter.paymentMethod = paymentMethod;
+    }
+
+    // Payment status filter
+    if (paymentStatus) {
+      filter.paymentStatus = paymentStatus;
+    }
+
+    // Search filter
+    if (search) {
+      filter.$or = [
+        { customerName: { $regex: search, $options: 'i' } },
+        { customerPhone: { $regex: search, $options: 'i' } },
+        { customerBusinessName: { $regex: search, $options: 'i' } },
+        { referenceNumber: { $regex: search, $options: 'i' } },
+        { saleNotes: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
     const wholesaleSales = await WholesaleSale.find(filter)
-      .sort({ createdAt: -1 })
+      .sort(sort)
       .populate('customerId', 'businessName firstName lastName phone email address')
-      .populate('items.productId', 'name price measurementUnit category images')
+      .populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder')
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
     const total = await WholesaleSale.countDocuments(filter);
 
+    // Calculate additional statistics
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todaySales = await WholesaleSale.countDocuments({
+      ...filter,
+      createdAt: { $gte: today }
+    });
+
+    const totalRevenue = await WholesaleSale.aggregate([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: '$grandTotal' } } }
+    ]);
+
     res.status(200).json({
       success: true,
       wholesaleSales,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
+      currentPage: parseInt(page),
+      total,
+      statistics: {
+        todaySales,
+        totalRevenue: totalRevenue[0]?.total || 0
+      }
     });
   } catch (error) {
     console.error('Error fetching wholesale sales:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching wholesale sales',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/statistics - Get comprehensive sales statistics
+router.get('/statistics/overview', auth, async (req, res) => {
+  try {
+    const { timeframe = 'month' } = req.query;
+    const wholesalerId = req.user.id;
+
+    // Calculate date range based on timeframe
+    const now = new Date();
+    let startDate = new Date();
+
+    switch (timeframe) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      case 'year':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+      default:
+        startDate = new Date(0); // All time
+    }
+
+    const matchStage = {
+      wholesaler: wholesalerId,
+      status: 'completed',
+      createdAt: { $gte: startDate }
+    };
+
+    // Main statistics
+    const statistics = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: 1 },
+          totalRevenue: { $sum: '$grandTotal' },
+          totalAmountPaid: { $sum: '$amountPaid' },
+          totalBalanceDue: { $sum: '$balanceDue' },
+          totalDiscount: { $sum: '$totalDiscount' },
+          averageSaleValue: { $avg: '$grandTotal' },
+          maxSaleValue: { $max: '$grandTotal' },
+          minSaleValue: { $min: '$grandTotal' },
+          totalItemsSold: { $sum: { $size: '$items' } }
+        }
+      }
+    ]);
+
+    // Sales by payment method
+    const paymentMethodStats = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: '$paymentMethod',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$grandTotal' },
+          percentage: { $avg: 1 }
+        }
+      }
+    ]);
+
+    // Sales by payment status
+    const paymentStatusStats = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: '$paymentStatus',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    // Top selling products
+    const topProducts = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.productId',
+          productName: { $first: '$items.productName' },
+          totalQuantity: { $sum: '$items.quantity' },
+          totalRevenue: { $sum: '$items.total' },
+          averagePrice: { $avg: '$items.unitPrice' }
+        }
+      },
+      { $sort: { totalQuantity: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Monthly sales trend
+    const monthlyTrend = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          salesCount: { $sum: 1 },
+          totalRevenue: { $sum: '$grandTotal' },
+          averageSale: { $avg: '$grandTotal' }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
+
+    const stats = statistics[0] || {
+      totalSales: 0,
+      totalRevenue: 0,
+      totalAmountPaid: 0,
+      totalBalanceDue: 0,
+      totalDiscount: 0,
+      averageSaleValue: 0,
+      maxSaleValue: 0,
+      minSaleValue: 0,
+      totalItemsSold: 0
+    };
+
+    res.status(200).json({
+      success: true,
+      statistics: {
+        ...stats,
+        timeframe: timeframe,
+        paymentMethodStats,
+        paymentStatusStats,
+        topProducts,
+        monthlyTrend
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching sales statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching sales statistics',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/recent - Get recent sales activity
+router.get('/recent/activity', auth, async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    const recentSales = await WholesaleSale.find({
+      wholesaler: req.user.id,
+      status: 'completed'
+    })
+    .populate('customerId', 'businessName firstName lastName')
+    .populate('items.productId', 'name category measurementUnit fromCertifiedOrder')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit))
+    .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items');
+
+    res.status(200).json({
+      success: true,
+      recentSales
+    });
+  } catch (error) {
+    console.error('Error fetching recent sales:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching recent sales',
       error: error.message
     });
   }
@@ -65,7 +296,7 @@ router.get('/:id', auth, async (req, res) => {
       wholesaler: req.user.id
     })
     .populate('customerId', 'businessName firstName lastName phone email address createdAt')
-    .populate('items.productId', 'name price costPrice measurementUnit category images description sku')
+    .populate('items.productId', 'name price costPrice measurementUnit category images description sku fromCertifiedOrder certifiedOrderSource')
     .populate('wholesaler', 'businessName firstName lastName phone email address');
 
     if (!wholesaleSale) {
@@ -95,7 +326,7 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// POST /api/wholesale-sales - Create new wholesale sale
+// POST /api/wholesale-sales - Create new wholesale sale with enhanced product handling
 router.post('/', auth, async (req, res) => {
   try {
     // ✅ ADD DEBUG LOGS TO SEE WHAT'S BEING RECEIVED
@@ -119,7 +350,8 @@ router.post('/', auth, async (req, res) => {
       grandTotal,
       amountPaid,
       balanceDue,
-      referenceNumber // ✅ CRITICAL FIX: ADD referenceNumber TO DESTRUCTURING
+      referenceNumber, // ✅ CRITICAL FIX: ADD referenceNumber TO DESTRUCTURING
+      isWalkInCustomer = false
     } = req.body;
 
     // ✅ VALIDATE referenceNumber EXISTS
@@ -144,9 +376,21 @@ router.post('/', auth, async (req, res) => {
 
     let customerDetails = {};
     let finalCustomerId = null;
+    let finalCustomerType = customerType;
 
+    // Handle walk-in customers
+    if (isWalkInCustomer) {
+      finalCustomerType = 'walk-in';
+      customerDetails = {
+        customerName: 'Walk-in Customer',
+        customerPhone: '0000000000',
+        customerEmail: '',
+        customerAddress: '',
+        customerBusinessName: 'Walk-in Customer'
+      };
+    }
     // Handle customer based on type
-    if (customerType === 'existing') {
+    else if (customerType === 'existing') {
       // Verify existing customer exists
       const existingCustomer = await User.findOne({
         _id: customerId,
@@ -187,37 +431,72 @@ router.post('/', auth, async (req, res) => {
       };
     }
 
-    // Check product availability and update quantities
+    // Enhanced product availability check for both regular and certified products
+    const productUpdates = [];
     for (const item of items) {
-      const product = await Product.findOne({
+      // Try to find product by ID first
+      let product = await Product.findOne({
         _id: item.productId,
         wholesaler: req.user.id
       });
 
+      // If not found by ID, try by SKU (for certified products)
+      if (!product) {
+        product = await Product.findOne({
+          sku: item.productId,
+          wholesaler: req.user.id
+        });
+      }
+
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: `Product not found: ${item.productName}`
+          message: `Product not found: ${item.productName || item.productId}`
         });
       }
 
       if (product.quantity < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${item.productName}. Available: ${product.quantity}`
+          message: `Insufficient stock for ${product.name}. Available: ${product.quantity}, Requested: ${item.quantity}`
         });
       }
 
+      // Track product update for batch processing
+      productUpdates.push({
+        product,
+        item,
+        oldQuantity: product.quantity
+      });
+    }
+
+    // Process all product updates
+    for (const update of productUpdates) {
+      const { product, item, oldQuantity } = update;
+      
       // Update product quantity
-      product.quantity -= item.quantity;
-      await product.save();
+      product.quantity = oldQuantity - item.quantity;
+      
+      // Track price change if selling price is different from current price
+      if (item.unitPrice !== product.price) {
+        product.updatePrice(
+          item.unitPrice,
+          req.user.id,
+          'Sale price adjustment',
+          referenceNumber,
+          'sale',
+          `Price changed during sale to ${customerName}`
+        );
+      } else {
+        await product.save();
+      }
     }
 
     // ✅ CRITICAL FIX: INCLUDE referenceNumber IN saleData
     const saleData = {
-      customerType,
+      customerType: finalCustomerType,
       customerId: finalCustomerId,
-      customerInfo: customerType === 'new' ? customerInfo : undefined,
+      customerInfo: customerType === 'new' && !isWalkInCustomer ? customerInfo : undefined,
       ...customerDetails,
       referenceNumber, // ✅ ADD THIS - WAS MISSING!
       saleDate: saleDate || new Date(),
@@ -241,7 +520,7 @@ router.post('/', auth, async (req, res) => {
 
     // Populate the sale with all details
     await wholesaleSale.populate('customerId', 'businessName firstName lastName phone email address');
-    await wholesaleSale.populate('items.productId', 'name price measurementUnit category images');
+    await wholesaleSale.populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder');
     await wholesaleSale.populate('wholesaler', 'businessName firstName lastName phone email address');
 
     // Add customer details to response
@@ -278,7 +557,7 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       ]
     })
     .sort({ createdAt: -1 })
-    .populate('items.productId', 'name price measurementUnit category images')
+    .populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder')
     .limit(limit * 1)
     .skip((page - 1) * limit);
 
@@ -290,6 +569,27 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       ]
     });
 
+    // Calculate customer lifetime value
+    const customerLifetimeValue = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: req.user.id,
+          $or: [
+            { customerId: new mongoose.Types.ObjectId(req.params.customerId) },
+            { 'customerInfo.phone': req.params.customerId }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalSpent: { $sum: '$grandTotal' },
+          totalOrders: { $sum: 1 },
+          averageOrderValue: { $avg: '$grandTotal' }
+        }
+      }
+    ]);
+
     // Add customer details to each sale
     const salesWithCustomerDetails = wholesaleSales.map(sale => ({
       ...sale.toObject(),
@@ -300,8 +600,13 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       success: true,
       wholesaleSales: salesWithCustomerDetails,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
+      currentPage: parseInt(page),
+      total,
+      customerStats: customerLifetimeValue[0] || {
+        totalSpent: 0,
+        totalOrders: 0,
+        averageOrderValue: 0
+      }
     });
   } catch (error) {
     console.error('Error fetching customer sales:', error);
@@ -313,7 +618,7 @@ router.get('/customer/:customerId', auth, async (req, res) => {
   }
 });
 
-// PUT /api/wholesale-sales/:id - Update wholesale sale
+// PUT /api/wholesale-sales/:id - Update wholesale sale with enhanced validation
 router.put('/:id', auth, async (req, res) => {
   try {
     const wholesaleSale = await WholesaleSale.findOne({
@@ -338,13 +643,37 @@ router.put('/:id', auth, async (req, res) => {
       }
     });
 
+    // Validate payment status transitions
+    if (updates.paymentStatus && wholesaleSale.paymentStatus !== updates.paymentStatus) {
+      const validTransitions = {
+        'pending': ['paid', 'partial'],
+        'partial': ['paid'],
+        'paid': [] // Once paid, cannot go back
+      };
+
+      if (!validTransitions[wholesaleSale.paymentStatus]?.includes(updates.paymentStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid payment status transition from ${wholesaleSale.paymentStatus} to ${updates.paymentStatus}`
+        });
+      }
+    }
+
+    // Update amount paid and balance due based on payment status
+    if (updates.paymentStatus === 'paid') {
+      updates.amountPaid = wholesaleSale.grandTotal;
+      updates.balanceDue = 0;
+    } else if (updates.paymentStatus === 'partial' && updates.amountPaid) {
+      updates.balanceDue = wholesaleSale.grandTotal - updates.amountPaid;
+    }
+
     const updatedSale = await WholesaleSale.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     )
     .populate('customerId', 'businessName firstName lastName phone email address')
-    .populate('items.productId', 'name price measurementUnit category images')
+    .populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder')
     .populate('wholesaler', 'businessName firstName lastName phone email address');
 
     // Add customer details to response
@@ -368,7 +697,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// DELETE /api/wholesale-sales/:id - Delete wholesale sale
+// DELETE /api/wholesale-sales/:id - Delete wholesale sale with enhanced product restoration
 router.delete('/:id', auth, async (req, res) => {
   try {
     const wholesaleSale = await WholesaleSale.findOne({
@@ -383,25 +712,209 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
 
-    // Restore product quantities
+    // Enhanced product quantity restoration for both regular and certified products
+    const restorationResults = [];
     for (const item of wholesaleSale.items) {
-      await Product.findByIdAndUpdate(
-        item.productId,
-        { $inc: { quantity: item.quantity } }
-      );
+      // Find product by ID or SKU
+      let product = await Product.findOne({
+        _id: item.productId,
+        wholesaler: req.user.id
+      });
+
+      if (!product) {
+        // Try finding by SKU for certified products
+        product = await Product.findOne({
+          sku: item.productId,
+          wholesaler: req.user.id
+        });
+      }
+
+      if (product) {
+        const oldQuantity = product.quantity;
+        product.quantity += item.quantity;
+        await product.save();
+        
+        restorationResults.push({
+          productName: product.name,
+          productId: product._id,
+          restoredQuantity: item.quantity,
+          newQuantity: product.quantity
+        });
+      } else {
+        restorationResults.push({
+          productName: item.productName,
+          productId: item.productId,
+          error: 'Product not found for restoration'
+        });
+      }
     }
 
     await WholesaleSale.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,
-      message: 'Wholesale sale deleted successfully'
+      message: 'Wholesale sale deleted successfully',
+      restorationResults,
+      deletedSale: {
+        referenceNumber: wholesaleSale.referenceNumber,
+        customerName: wholesaleSale.customerName,
+        grandTotal: wholesaleSale.grandTotal
+      }
     });
   } catch (error) {
     console.error('Error deleting wholesale sale:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting wholesale sale',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/dashboard/summary - Get dashboard summary
+router.get('/dashboard/summary', auth, async (req, res) => {
+  try {
+    const wholesalerId = req.user.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+
+    // Today's sales
+    const todaySales = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: wholesalerId,
+          status: 'completed',
+          createdAt: { $gte: today, $lt: tomorrow }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          revenue: { $sum: '$grandTotal' },
+          itemsSold: { $sum: { $size: '$items' } }
+        }
+      }
+    ]);
+
+    // Yesterday's sales for comparison
+    const yesterdaySales = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: wholesalerId,
+          status: 'completed',
+          createdAt: { $gte: yesterday, $lt: today }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          revenue: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    // This month sales
+    const thisMonthSales = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: wholesalerId,
+          status: 'completed',
+          createdAt: { $gte: thisMonthStart }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          revenue: { $sum: '$grandTotal' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Last month sales
+    const lastMonthSales = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: wholesalerId,
+          status: 'completed',
+          createdAt: { $gte: lastMonthStart, $lt: thisMonthStart }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          revenue: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    // Pending payments
+    const pendingPayments = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: wholesalerId,
+          paymentStatus: { $in: ['pending', 'partial'] },
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalBalance: { $sum: '$balanceDue' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const todayData = todaySales[0] || { count: 0, revenue: 0, itemsSold: 0 };
+    const yesterdayRevenue = yesterdaySales[0]?.revenue || 0;
+    const thisMonthData = thisMonthSales[0] || { revenue: 0, count: 0 };
+    const lastMonthRevenue = lastMonthSales[0]?.revenue || 0;
+    const pendingData = pendingPayments[0] || { totalBalance: 0, count: 0 };
+
+    // Calculate trends
+    const revenueTrend = yesterdayRevenue > 0 ? 
+      ((todayData.revenue - yesterdayRevenue) / yesterdayRevenue * 100).toFixed(1) : 0;
+    
+    const monthlyTrend = lastMonthRevenue > 0 ? 
+      ((thisMonthData.revenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1) : 0;
+
+    res.status(200).json({
+      success: true,
+      summary: {
+        today: {
+          sales: todayData.count,
+          revenue: todayData.revenue,
+          itemsSold: todayData.itemsSold,
+          revenueTrend: parseFloat(revenueTrend)
+        },
+        thisMonth: {
+          sales: thisMonthData.count,
+          revenue: thisMonthData.revenue,
+          monthlyTrend: parseFloat(monthlyTrend)
+        },
+        pendingPayments: {
+          count: pendingData.count,
+          totalBalance: pendingData.totalBalance
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching dashboard summary',
       error: error.message
     });
   }

@@ -61,7 +61,7 @@ const wholesaleSaleSchema = new mongoose.Schema({
   // Customer Information
   customerType: {
     type: String,
-    enum: ['existing', 'new'],
+    enum: ['existing', 'new', 'walk-in'],
     required: true
   },
   customerId: {

@@ -1,5 +1,6 @@
 // routes/wholesaleSales.js
 const express = require('express');
+const mongoose = require('mongoose'); // Added mongoose import
 const auth = require('../middleware/auth');
 const WholesaleSale = require('../models/WholesaleSale');
 const Product = require('../models/Product');
@@ -7,9 +8,123 @@ const User = require('../models/User'); // For existing customers
 
 const router = express.Router();
 
+// ==================== ENHANCED DEBUGGING & TESTING ROUTES ====================
+
+// GET /api/wholesale-sales/test/connection - Test API connection and database
+router.get('/test/connection', auth, async (req, res) => {
+  try {
+    console.log('🧪 Testing wholesale-sales API connection...');
+    console.log('🔑 User ID:', req.user.id);
+    console.log('🔑 User Role:', req.user.role);
+    
+    // Test database connections
+    const saleCount = await WholesaleSale.countDocuments({ wholesaler: req.user.id });
+    const productCount = await Product.countDocuments({ wholesaler: req.user.id });
+    const customerCount = await User.countDocuments({ 
+      role: { $in: ['retailer', 'wholesaler'] },
+      _id: { $ne: req.user.id }
+    });
+    
+    res.status(200).json({
+      success: true,
+      message: 'Wholesale Sales API is working!',
+      user: {
+        id: req.user.id,
+        role: req.user.role,
+        businessName: req.user.businessName
+      },
+      database: {
+        sales: saleCount,
+        products: productCount,
+        customers: customerCount,
+        mongooseState: mongoose.connection.readyState // 1 = connected
+      },
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        create: 'POST /api/wholesale-sales',
+        list: 'GET /api/wholesale-sales',
+        statistics: 'GET /api/wholesale-sales/statistics/overview',
+        recent: 'GET /api/wholesale-sales/recent/activity',
+        dashboard: 'GET /api/wholesale-sales/dashboard/summary'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Test route error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test route failed',
+      error: error.message,
+      mongooseState: mongoose.connection.readyState
+    });
+  }
+});
+
+// POST /api/wholesale-sales/test/create - Test sale creation with minimal data
+router.post('/test/create', auth, async (req, res) => {
+  try {
+    console.log('🎯 TEST CREATE ENDPOINT HIT');
+    
+    // Create a simple test sale
+    const testSale = new WholesaleSale({
+      customerType: 'walk-in',
+      customerName: 'Test Customer',
+      customerPhone: '0000000000',
+      referenceNumber: `TEST-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      saleDate: new Date(),
+      paymentMethod: 'cash',
+      paymentStatus: 'paid',
+      items: [{
+        productId: new mongoose.Types.ObjectId(), // dummy ID for testing
+        productName: 'Test Product',
+        quantity: 1,
+        unitPrice: 100,
+        discount: 0,
+        total: 100,
+        isCertifiedProduct: false
+      }],
+      subtotal: 100,
+      totalDiscount: 0,
+      grandTotal: 100,
+      amountPaid: 100,
+      balanceDue: 0,
+      wholesaler: req.user.id,
+      status: 'completed'
+    });
+
+    await testSale.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Test sale created successfully',
+      sale: {
+        id: testSale._id,
+        referenceNumber: testSale.referenceNumber,
+        customerName: testSale.customerName,
+        grandTotal: testSale.grandTotal
+      },
+      debug: {
+        receivedBody: req.body,
+        user: req.user.id
+      }
+    });
+  } catch (error) {
+    console.error('Test create error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test create failed',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// ==================== EXISTING ROUTES (ENHANCED) ====================
+
 // GET /api/wholesale-sales - Get all wholesale sales for wholesaler with enhanced filtering
 router.get('/', auth, async (req, res) => {
   try {
+    console.log('📊 Fetching wholesale sales for user:', req.user.id);
+    
     const { 
       page = 1, 
       limit = 10, 
@@ -68,6 +183,8 @@ router.get('/', auth, async (req, res) => {
     const sort = {};
     sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
+    console.log('🔍 Query filter:', JSON.stringify(filter, null, 2));
+
     const wholesaleSales = await WholesaleSale.find(filter)
       .sort(sort)
       .populate('customerId', 'businessName firstName lastName phone email address')
@@ -91,6 +208,8 @@ router.get('/', auth, async (req, res) => {
       { $group: { _id: null, total: { $sum: '$grandTotal' } } }
     ]);
 
+    console.log(`✅ Found ${wholesaleSales.length} sales out of ${total} total`);
+
     res.status(200).json({
       success: true,
       wholesaleSales,
@@ -103,20 +222,23 @@ router.get('/', auth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching wholesale sales:', error);
+    console.error('❌ Error fetching wholesale sales:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching wholesale sales',
-      error: error.message
+      error: error.message,
+      query: req.query
     });
   }
 });
 
-// GET /api/wholesale-sales/statistics - Get comprehensive sales statistics
+// GET /api/wholesale-sales/statistics/overview - Get comprehensive sales statistics
 router.get('/statistics/overview', auth, async (req, res) => {
   try {
     const { timeframe = 'month' } = req.query;
     const wholesalerId = req.user.id;
+
+    console.log(`📈 Fetching statistics for timeframe: ${timeframe}`);
 
     // Calculate date range based on timeframe
     const now = new Date();
@@ -147,6 +269,8 @@ router.get('/statistics/overview', auth, async (req, res) => {
       status: 'completed',
       createdAt: { $gte: startDate }
     };
+
+    console.log('📊 Statistics match stage:', matchStage);
 
     // Main statistics
     const statistics = await WholesaleSale.aggregate([
@@ -238,6 +362,8 @@ router.get('/statistics/overview', auth, async (req, res) => {
       totalItemsSold: 0
     };
 
+    console.log(`✅ Statistics calculated: ${stats.totalSales} sales, ${stats.totalRevenue} revenue`);
+
     res.status(200).json({
       success: true,
       statistics: {
@@ -250,7 +376,7 @@ router.get('/statistics/overview', auth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching sales statistics:', error);
+    console.error('❌ Error fetching sales statistics:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching sales statistics',
@@ -259,10 +385,12 @@ router.get('/statistics/overview', auth, async (req, res) => {
   }
 });
 
-// GET /api/wholesale-sales/recent - Get recent sales activity
+// GET /api/wholesale-sales/recent/activity - Get recent sales activity
 router.get('/recent/activity', auth, async (req, res) => {
   try {
     const { limit = 5 } = req.query;
+
+    console.log(`🕒 Fetching recent ${limit} sales`);
 
     const recentSales = await WholesaleSale.find({
       wholesaler: req.user.id,
@@ -274,12 +402,14 @@ router.get('/recent/activity', auth, async (req, res) => {
     .limit(parseInt(limit))
     .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items');
 
+    console.log(`✅ Found ${recentSales.length} recent sales`);
+
     res.status(200).json({
       success: true,
       recentSales
     });
   } catch (error) {
-    console.error('Error fetching recent sales:', error);
+    console.error('❌ Error fetching recent sales:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching recent sales',
@@ -291,8 +421,11 @@ router.get('/recent/activity', auth, async (req, res) => {
 // GET /api/wholesale-sales/:id - Get single wholesale sale with full details
 router.get('/:id', auth, async (req, res) => {
   try {
+    const saleId = req.params.id;
+    console.log(`🔍 Fetching sale details for: ${saleId}`);
+
     const wholesaleSale = await WholesaleSale.findOne({
-      _id: req.params.id,
+      _id: saleId,
       wholesaler: req.user.id
     })
     .populate('customerId', 'businessName firstName lastName phone email address createdAt')
@@ -300,6 +433,7 @@ router.get('/:id', auth, async (req, res) => {
     .populate('wholesaler', 'businessName firstName lastName phone email address');
 
     if (!wholesaleSale) {
+      console.log(`❌ Sale not found: ${saleId}`);
       return res.status(404).json({
         success: false,
         message: 'Wholesale sale not found'
@@ -312,12 +446,14 @@ router.get('/:id', auth, async (req, res) => {
       customerDetails: wholesaleSale.customerDetails
     };
 
+    console.log(`✅ Sale details retrieved: ${saleWithCustomerDetails.referenceNumber}`);
+
     res.status(200).json({
       success: true,
       wholesaleSale: saleWithCustomerDetails
     });
   } catch (error) {
-    console.error('Error fetching wholesale sale:', error);
+    console.error('❌ Error fetching wholesale sale:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching wholesale sale',
@@ -326,13 +462,37 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// POST /api/wholesale-sales - Create new wholesale sale with enhanced product handling
+// POST /api/wholesale-sales - Create new wholesale sale with ENHANCED product handling
 router.post('/', auth, async (req, res) => {
   try {
-    // ✅ ADD DEBUG LOGS TO SEE WHAT'S BEING RECEIVED
-    console.log('📥 BACKEND - Received sale data:', JSON.stringify(req.body, null, 2));
-    console.log('🔍 BACKEND - Reference number received:', req.body.referenceNumber);
-    console.log('🔍 BACKEND - Has referenceNumber:', !!req.body.referenceNumber);
+    console.log('🎯 BACKEND - CREATE SALE ENDPOINT HIT');
+    console.log('👤 User:', req.user.id, req.user.businessName);
+    
+    // Enhanced debugging with request details
+    console.log('📦 Request headers:', {
+      'content-type': req.headers['content-type'],
+      'content-length': req.headers['content-length'],
+      'authorization': req.headers['authorization'] ? 'Present' : 'Missing'
+    });
+    
+    // ✅ ENHANCED DEBUG LOGS
+    console.log('📥 BACKEND - Received sale data:', JSON.stringify({
+      customerType: req.body.customerType,
+      customerName: req.body.customerName,
+      referenceNumber: req.body.referenceNumber,
+      itemsCount: req.body.items?.length,
+      items: req.body.items?.map(item => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        isCertifiedProduct: item.isCertifiedProduct
+      })),
+      totals: {
+        subtotal: req.body.subtotal,
+        grandTotal: req.body.grandTotal
+      }
+    }, null, 2));
     
     const {
       customerType,
@@ -350,13 +510,13 @@ router.post('/', auth, async (req, res) => {
       grandTotal,
       amountPaid,
       balanceDue,
-      referenceNumber, // ✅ CRITICAL FIX: ADD referenceNumber TO DESTRUCTURING
+      referenceNumber,
       isWalkInCustomer = false
     } = req.body;
 
-    // ✅ VALIDATE referenceNumber EXISTS
+    // ✅ ENHANCED VALIDATION
     if (!referenceNumber) {
-      console.error('❌ BACKEND - referenceNumber is missing after destructuring!');
+      console.error('❌ BACKEND - referenceNumber is missing!');
       return res.status(400).json({
         success: false,
         message: 'Reference number is required',
@@ -364,7 +524,7 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
-    console.log('✅ BACKEND - referenceNumber after destructuring:', referenceNumber);
+    console.log('✅ BACKEND - referenceNumber validated:', referenceNumber);
 
     // Validate required fields
     if (!customerName || !items || items.length === 0) {
@@ -388,9 +548,11 @@ router.post('/', auth, async (req, res) => {
         customerAddress: '',
         customerBusinessName: 'Walk-in Customer'
       };
+      console.log('👥 Walk-in customer detected');
     }
     // Handle customer based on type
     else if (customerType === 'existing') {
+      console.log('👥 Existing customer:', customerId);
       // Verify existing customer exists
       const existingCustomer = await User.findOne({
         _id: customerId,
@@ -413,6 +575,7 @@ router.post('/', auth, async (req, res) => {
         customerBusinessName: existingCustomer.businessName
       };
     } else {
+      console.log('👥 New customer detected');
       // New customer - validate required fields
       if (!customerInfo?.name || !customerInfo?.phone) {
         return res.status(400).json({
@@ -431,10 +594,14 @@ router.post('/', auth, async (req, res) => {
       };
     }
 
-    // Enhanced product availability check for both regular and certified products
+    // ENHANCED product availability check for both regular and certified products
+    console.log(`🔍 Checking product availability for ${items.length} items`);
     const productUpdates = [];
+    
     for (const item of items) {
-      // Try to find product by ID first
+      console.log(`🔍 Processing item: ${item.productName} (ID: ${item.productId}, Certified: ${item.isCertifiedProduct})`);
+      
+      // Enhanced product lookup with multiple fallbacks
       let product = await Product.findOne({
         _id: item.productId,
         wholesaler: req.user.id
@@ -442,18 +609,37 @@ router.post('/', auth, async (req, res) => {
 
       // If not found by ID, try by SKU (for certified products)
       if (!product) {
+        console.log(`🔄 Product not found by ID, trying SKU: ${item.productId}`);
         product = await Product.findOne({
           sku: item.productId,
           wholesaler: req.user.id
         });
       }
 
+      // If still not found, try name matching (fallback for edge cases)
       if (!product) {
-        return res.status(404).json({
-          success: false,
-          message: `Product not found: ${item.productName || item.productId}`
+        console.log(`🔄 Product not found by SKU, trying name: ${item.productName}`);
+        product = await Product.findOne({
+          name: item.productName,
+          wholesaler: req.user.id
         });
       }
+
+      if (!product) {
+        console.error(`❌ Product not found: ${item.productName} (ID: ${item.productId})`);
+        return res.status(404).json({
+          success: false,
+          message: `Product not found: ${item.productName || item.productId}`,
+          details: {
+            productId: item.productId,
+            productName: item.productName,
+            searchedBy: ['_id', 'sku', 'name'],
+            user: req.user.id
+          }
+        });
+      }
+
+      console.log(`✅ Found product: ${product.name}, Available: ${product.quantity}, Requested: ${item.quantity}, Certified: ${product.fromCertifiedOrder}`);
 
       if (product.quantity < item.quantity) {
         return res.status(400).json({
@@ -470,26 +656,33 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
-    // Process all product updates
+    // Process all product updates with enhanced logging
+    console.log('🔄 Updating product quantities...');
     for (const update of productUpdates) {
       const { product, item, oldQuantity } = update;
+      
+      console.log(`📦 Updating ${product.name}: ${oldQuantity} -> ${oldQuantity - item.quantity}`);
       
       // Update product quantity
       product.quantity = oldQuantity - item.quantity;
       
       // Track price change if selling price is different from current price
       if (item.unitPrice !== product.price) {
-        product.updatePrice(
-          item.unitPrice,
-          req.user.id,
-          'Sale price adjustment',
-          referenceNumber,
-          'sale',
-          `Price changed during sale to ${customerName}`
-        );
-      } else {
-        await product.save();
+        console.log(`💰 Price adjustment: ${product.name} - Old: ${product.price}, New: ${item.unitPrice}`);
+        if (typeof product.updatePrice === 'function') {
+          product.updatePrice(
+            item.unitPrice,
+            req.user.id,
+            'Sale price adjustment',
+            referenceNumber,
+            'sale',
+            `Price changed during sale to ${customerName}`
+          );
+        }
       }
+      
+      await product.save();
+      console.log(`✅ Product updated: ${product.name} - New quantity: ${product.quantity}`);
     }
 
     // ✅ CRITICAL FIX: INCLUDE referenceNumber IN saleData
@@ -498,7 +691,7 @@ router.post('/', auth, async (req, res) => {
       customerId: finalCustomerId,
       customerInfo: customerType === 'new' && !isWalkInCustomer ? customerInfo : undefined,
       ...customerDetails,
-      referenceNumber, // ✅ ADD THIS - WAS MISSING!
+      referenceNumber, // ✅ WAS MISSING - NOW INCLUDED!
       saleDate: saleDate || new Date(),
       saleTime,
       paymentMethod,
@@ -518,6 +711,8 @@ router.post('/', auth, async (req, res) => {
     const wholesaleSale = new WholesaleSale(saleData);
     await wholesaleSale.save();
 
+    console.log('💾 Sale saved successfully with ID:', wholesaleSale._id);
+
     // Populate the sale with all details
     await wholesaleSale.populate('customerId', 'businessName firstName lastName phone email address');
     await wholesaleSale.populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder');
@@ -529,17 +724,33 @@ router.post('/', auth, async (req, res) => {
       customerDetails: wholesaleSale.customerDetails
     };
 
+    console.log('🎉 Sale creation completed successfully!');
+
     res.status(201).json({
       success: true,
       message: 'Wholesale sale created successfully',
-      wholesaleSale: saleWithCustomerDetails
+      wholesaleSale: saleWithCustomerDetails,
+      debug: {
+        itemsProcessed: items.length,
+        productsUpdated: productUpdates.length,
+        referenceNumber: referenceNumber
+      }
     });
   } catch (error) {
     console.error('❌ BACKEND - Error creating wholesale sale:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Request body:', JSON.stringify(req.body, null, 2));
+    
     res.status(400).json({
       success: false,
       message: 'Error creating wholesale sale',
-      error: error.message
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      receivedData: {
+        customerName: req.body.customerName,
+        referenceNumber: req.body.referenceNumber,
+        itemsCount: req.body.items?.length
+      }
     });
   }
 });
@@ -547,13 +758,16 @@ router.post('/', auth, async (req, res) => {
 // GET /api/wholesale-sales/customer/:customerId - Get sales for specific customer
 router.get('/customer/:customerId', auth, async (req, res) => {
   try {
+    const customerId = req.params.customerId;
     const { page = 1, limit = 10 } = req.query;
+
+    console.log(`👤 Fetching sales for customer: ${customerId}`);
     
     const wholesaleSales = await WholesaleSale.find({
       wholesaler: req.user.id,
       $or: [
-        { customerId: req.params.customerId },
-        { 'customerInfo.phone': req.params.customerId } // Also search by phone for new customers
+        { customerId: customerId },
+        { 'customerInfo.phone': customerId } // Also search by phone for new customers
       ]
     })
     .sort({ createdAt: -1 })
@@ -564,8 +778,8 @@ router.get('/customer/:customerId', auth, async (req, res) => {
     const total = await WholesaleSale.countDocuments({
       wholesaler: req.user.id,
       $or: [
-        { customerId: req.params.customerId },
-        { 'customerInfo.phone': req.params.customerId }
+        { customerId: customerId },
+        { 'customerInfo.phone': customerId }
       ]
     });
 
@@ -575,8 +789,8 @@ router.get('/customer/:customerId', auth, async (req, res) => {
         $match: {
           wholesaler: req.user.id,
           $or: [
-            { customerId: new mongoose.Types.ObjectId(req.params.customerId) },
-            { 'customerInfo.phone': req.params.customerId }
+            { customerId: new mongoose.Types.ObjectId(customerId) },
+            { 'customerInfo.phone': customerId }
           ]
         }
       },
@@ -596,6 +810,8 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       customerDetails: sale.customerDetails
     }));
 
+    console.log(`✅ Found ${wholesaleSales.length} sales for customer ${customerId}`);
+
     res.status(200).json({
       success: true,
       wholesaleSales: salesWithCustomerDetails,
@@ -609,7 +825,7 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching customer sales:', error);
+    console.error('❌ Error fetching customer sales:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching customer sales',
@@ -621,8 +837,11 @@ router.get('/customer/:customerId', auth, async (req, res) => {
 // PUT /api/wholesale-sales/:id - Update wholesale sale with enhanced validation
 router.put('/:id', auth, async (req, res) => {
   try {
+    const saleId = req.params.id;
+    console.log(`✏️ Updating sale: ${saleId}`);
+
     const wholesaleSale = await WholesaleSale.findOne({
-      _id: req.params.id,
+      _id: saleId,
       wholesaler: req.user.id
     });
 
@@ -642,6 +861,8 @@ router.put('/:id', auth, async (req, res) => {
         updates[field] = req.body[field];
       }
     });
+
+    console.log('📝 Updates to apply:', updates);
 
     // Validate payment status transitions
     if (updates.paymentStatus && wholesaleSale.paymentStatus !== updates.paymentStatus) {
@@ -668,7 +889,7 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     const updatedSale = await WholesaleSale.findByIdAndUpdate(
-      req.params.id,
+      saleId,
       updates,
       { new: true, runValidators: true }
     )
@@ -682,13 +903,15 @@ router.put('/:id', auth, async (req, res) => {
       customerDetails: updatedSale.customerDetails
     };
 
+    console.log(`✅ Sale updated successfully: ${saleId}`);
+
     res.status(200).json({
       success: true,
       message: 'Wholesale sale updated successfully',
       wholesaleSale: saleWithCustomerDetails
     });
   } catch (error) {
-    console.error('Error updating wholesale sale:', error);
+    console.error('❌ Error updating wholesale sale:', error);
     res.status(400).json({
       success: false,
       message: 'Error updating wholesale sale',
@@ -700,8 +923,11 @@ router.put('/:id', auth, async (req, res) => {
 // DELETE /api/wholesale-sales/:id - Delete wholesale sale with enhanced product restoration
 router.delete('/:id', auth, async (req, res) => {
   try {
+    const saleId = req.params.id;
+    console.log(`🗑️ Deleting sale: ${saleId}`);
+
     const wholesaleSale = await WholesaleSale.findOne({
-      _id: req.params.id,
+      _id: saleId,
       wholesaler: req.user.id
     });
 
@@ -714,6 +940,8 @@ router.delete('/:id', auth, async (req, res) => {
 
     // Enhanced product quantity restoration for both regular and certified products
     const restorationResults = [];
+    console.log(`🔄 Restoring quantities for ${wholesaleSale.items.length} items`);
+    
     for (const item of wholesaleSale.items) {
       // Find product by ID or SKU
       let product = await Product.findOne({
@@ -740,16 +968,22 @@ router.delete('/:id', auth, async (req, res) => {
           restoredQuantity: item.quantity,
           newQuantity: product.quantity
         });
+        
+        console.log(`✅ Restored ${item.quantity} units of ${product.name}`);
       } else {
         restorationResults.push({
           productName: item.productName,
           productId: item.productId,
           error: 'Product not found for restoration'
         });
+        
+        console.log(`⚠️ Product not found for restoration: ${item.productName}`);
       }
     }
 
-    await WholesaleSale.findByIdAndDelete(req.params.id);
+    await WholesaleSale.findByIdAndDelete(saleId);
+
+    console.log(`✅ Sale deleted successfully: ${saleId}`);
 
     res.status(200).json({
       success: true,
@@ -762,7 +996,7 @@ router.delete('/:id', auth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error deleting wholesale sale:', error);
+    console.error('❌ Error deleting wholesale sale:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting wholesale sale',
@@ -775,6 +1009,8 @@ router.delete('/:id', auth, async (req, res) => {
 router.get('/dashboard/summary', auth, async (req, res) => {
   try {
     const wholesalerId = req.user.id;
+    console.log('📊 Fetching dashboard summary for user:', wholesalerId);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -890,6 +1126,12 @@ router.get('/dashboard/summary', auth, async (req, res) => {
     const monthlyTrend = lastMonthRevenue > 0 ? 
       ((thisMonthData.revenue - lastMonthRevenue) / lastMonthRevenue * 100).toFixed(1) : 0;
 
+    console.log('✅ Dashboard summary calculated:', {
+      todaySales: todayData.count,
+      todayRevenue: todayData.revenue,
+      thisMonthRevenue: thisMonthData.revenue
+    });
+
     res.status(200).json({
       success: true,
       summary: {
@@ -911,10 +1153,104 @@ router.get('/dashboard/summary', auth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching dashboard summary:', error);
+    console.error('❌ Error fetching dashboard summary:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching dashboard summary',
+      error: error.message
+    });
+  }
+});
+
+// ==================== NEW ENHANCEMENTS ====================
+
+// GET /api/wholesale-sales/export/csv - Export sales data as CSV
+router.get('/export/csv', auth, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    const filter = { wholesaler: req.user.id };
+    
+    if (startDate || endDate) {
+      filter.saleDate = {};
+      if (startDate) filter.saleDate.$gte = new Date(startDate);
+      if (endDate) filter.saleDate.$lte = new Date(endDate);
+    }
+
+    const sales = await WholesaleSale.find(filter)
+      .populate('customerId', 'businessName phone')
+      .populate('items.productId', 'name sku')
+      .sort({ saleDate: -1 });
+
+    // Generate CSV header
+    let csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Unit Price,Total,Payment Method,Payment Status\n';
+    
+    // Generate CSV rows
+    sales.forEach(sale => {
+      sale.items.forEach(item => {
+        csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.unitPrice},${item.total},"${sale.paymentMethod}","${sale.paymentStatus}"\n`;
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=sales-export-${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(csv);
+    
+  } catch (error) {
+    console.error('Error exporting sales CSV:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error exporting sales data',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/products/popular - Get popular products
+router.get('/products/popular', auth, async (req, res) => {
+  try {
+    const { limit = 10, timeframe = 'month' } = req.query;
+    
+    // Calculate date range
+    const startDate = new Date();
+    if (timeframe === 'week') startDate.setDate(startDate.getDate() - 7);
+    else if (timeframe === 'month') startDate.setMonth(startDate.getMonth() - 1);
+    else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1);
+    else startDate.setFullYear(2000); // All time
+
+    const popularProducts = await WholesaleSale.aggregate([
+      {
+        $match: {
+          wholesaler: req.user.id,
+          status: 'completed',
+          saleDate: { $gte: startDate }
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.productId',
+          productName: { $first: '$items.productName' },
+          totalQuantity: { $sum: '$items.quantity' },
+          totalRevenue: { $sum: '$items.total' },
+          saleCount: { $sum: 1 }
+        }
+      },
+      { $sort: { totalQuantity: -1 } },
+      { $limit: parseInt(limit) }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      popularProducts,
+      timeframe,
+      limit: parseInt(limit)
+    });
+  } catch (error) {
+    console.error('Error fetching popular products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching popular products',
       error: error.message
     });
   }

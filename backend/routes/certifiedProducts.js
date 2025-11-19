@@ -1,24 +1,27 @@
 // routes/certifiedProducts.js
 const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
 const {
   syncCertifiedProducts,
   getCertifiedProducts,
-  getAllProducts
+  getAllProducts,
+  getLowStockCertifiedProducts
 } = require('../controllers/certifiedProductsController');
-const auth = require('../middleware/auth');
 
-const router = express.Router();
-
-// All routes are protected and require wholesaler role
+// Apply auth middleware to all routes
 router.use(auth);
 
-// POST /api/certified-products/sync - Sync certified supplier orders to products
+// POST /api/certified-products/sync - Sync certified products from orders
 router.post('/sync', syncCertifiedProducts);
 
-// GET /api/certified-products - Get only certified products
+// GET /api/certified-products - Get certified products
 router.get('/', getCertifiedProducts);
 
-// GET /api/products - Get all products including certified ones (updated route)
+// GET /api/certified-products/low-stock - Get low stock certified products
+router.get('/low-stock', getLowStockCertifiedProducts);
+
+// GET /api/certified-products/all - Get all products including certified
 router.get('/all', getAllProducts);
 
 module.exports = router;

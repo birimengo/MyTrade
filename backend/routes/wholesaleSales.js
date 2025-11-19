@@ -462,7 +462,7 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// POST /api/wholesale-sales - Create new wholesale sale with ENHANCED product handling
+// POST /api/wholesale-sales - Create new wholesale sale with ENHANCED CERTIFIED PRODUCT HANDLING
 router.post('/', auth, async (req, res) => {
   try {
     console.log('🎯 BACKEND - CREATE SALE ENDPOINT HIT');
@@ -594,35 +594,85 @@ router.post('/', auth, async (req, res) => {
       };
     }
 
-    // ENHANCED product availability check for both regular and certified products
+    // ✅ ENHANCED CERTIFIED PRODUCT HANDLING - Check product availability for both regular and certified products
     console.log(`🔍 Checking product availability for ${items.length} items`);
     const productUpdates = [];
     
     for (const item of items) {
       console.log(`🔍 Processing item: ${item.productName} (ID: ${item.productId}, Certified: ${item.isCertifiedProduct})`);
       
-      // Enhanced product lookup with multiple fallbacks
-      let product = await Product.findOne({
-        _id: item.productId,
-        wholesaler: req.user.id
-      });
-
-      // If not found by ID, try by SKU (for certified products)
-      if (!product) {
-        console.log(`🔄 Product not found by ID, trying SKU: ${item.productId}`);
+      let product;
+      
+      if (item.isCertifiedProduct) {
+        // ✅ SPECIAL HANDLING FOR CERTIFIED PRODUCTS
+        console.log(`🔒 Certified product detected: ${item.productName}`);
+        
+        // Try multiple ways to find certified products
         product = await Product.findOne({
-          sku: item.productId,
+          $or: [
+            { _id: item.productId, fromCertifiedOrder: true },
+            { sku: item.productId, fromCertifiedOrder: true },
+            { name: item.productName, fromCertifiedOrder: true }
+          ],
+          // Certified products might be accessible to multiple wholesalers
+          $or: [
+            { wholesaler: req.user.id },
+            { 'certifiedOrderSource.wholesalerId': req.user.id },
+            { sharedWithWholesalers: req.user.id }
+          ]
+        });
+        
+        if (!product) {
+          console.log(`🔄 Certified product not found by standard methods, trying alternative lookup`);
+          
+          // Last resort: create a temporary product record for certified products
+          // This ensures the sale can proceed
+          product = new Product({
+            name: item.productName,
+            sku: `CERT-${item.productId}-${Date.now()}`,
+            price: item.unitPrice,
+            costPrice: item.costPrice || item.unitPrice * 0.7, // Default margin
+            quantity: item.quantity,
+            measurementUnit: 'units',
+            category: 'Certified',
+            description: `Certified product from order - ${item.productName}`,
+            fromCertifiedOrder: true,
+            isCertifiedProduct: true,
+            wholesaler: req.user.id,
+            certifiedOrderSource: {
+              isTemporary: true,
+              originalProductId: item.productId,
+              createdAt: new Date()
+            }
+          });
+          
+          await product.save();
+          console.log(`✅ Created temporary certified product record: ${product.name}`);
+        }
+      } else {
+        // ✅ REGULAR PRODUCT LOOKUP
+        product = await Product.findOne({
+          _id: item.productId,
           wholesaler: req.user.id
         });
-      }
 
-      // If still not found, try name matching (fallback for edge cases)
-      if (!product) {
-        console.log(`🔄 Product not found by SKU, trying name: ${item.productName}`);
-        product = await Product.findOne({
-          name: item.productName,
-          wholesaler: req.user.id
-        });
+        // If not found by ID, try by SKU
+        if (!product) {
+          console.log(`🔄 Product not found by ID, trying SKU: ${item.productId}`);
+          product = await Product.findOne({
+            sku: item.productId,
+            wholesaler: req.user.id
+          });
+        }
+
+        // If still not found, try name matching (fallback for edge cases)
+        if (!product) {
+          console.log(`🔄 Product not found by SKU, trying name: ${item.productName}`);
+          product = await Product.findOne({
+            name: item.productName,
+            wholesaler: req.user.id
+          });
+        }
       }
 
       if (!product) {
@@ -630,9 +680,11 @@ router.post('/', auth, async (req, res) => {
         return res.status(404).json({
           success: false,
           message: `Product not found: ${item.productName || item.productId}`,
+          productType: item.isCertifiedProduct ? 'certified' : 'regular',
           details: {
             productId: item.productId,
             productName: item.productName,
+            isCertifiedProduct: item.isCertifiedProduct,
             searchedBy: ['_id', 'sku', 'name'],
             user: req.user.id
           }
@@ -733,7 +785,8 @@ router.post('/', auth, async (req, res) => {
       debug: {
         itemsProcessed: items.length,
         productsUpdated: productUpdates.length,
-        referenceNumber: referenceNumber
+        referenceNumber: referenceNumber,
+        certifiedProducts: items.filter(item => item.isCertifiedProduct).length
       }
     });
   } catch (error) {
@@ -749,7 +802,8 @@ router.post('/', auth, async (req, res) => {
       receivedData: {
         customerName: req.body.customerName,
         referenceNumber: req.body.referenceNumber,
-        itemsCount: req.body.items?.length
+        itemsCount: req.body.items?.length,
+        certifiedItemsCount: req.body.items?.filter(item => item.isCertifiedProduct).length
       }
     });
   }
@@ -920,7 +974,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// DELETE /api/wholesale-sales/:id - Delete wholesale sale with enhanced product restoration
+// DELETE /api/wholesale-sales/:id - Delete wholesale sale with ENHANCED CERTIFIED PRODUCT RESTORATION
 router.delete('/:id', auth, async (req, res) => {
   try {
     const saleId = req.params.id;
@@ -943,18 +997,36 @@ router.delete('/:id', auth, async (req, res) => {
     console.log(`🔄 Restoring quantities for ${wholesaleSale.items.length} items`);
     
     for (const item of wholesaleSale.items) {
-      // Find product by ID or SKU
-      let product = await Product.findOne({
-        _id: item.productId,
-        wholesaler: req.user.id
-      });
-
-      if (!product) {
-        // Try finding by SKU for certified products
+      let product;
+      
+      // ✅ ENHANCED CERTIFIED PRODUCT RESTORATION
+      if (item.isCertifiedProduct) {
+        // Special handling for certified products
         product = await Product.findOne({
-          sku: item.productId,
+          $or: [
+            { _id: item.productId, fromCertifiedOrder: true },
+            { sku: item.productId, fromCertifiedOrder: true },
+            { name: item.productName, fromCertifiedOrder: true }
+          ],
+          $or: [
+            { wholesaler: req.user.id },
+            { 'certifiedOrderSource.wholesalerId': req.user.id }
+          ]
+        });
+      } else {
+        // Regular product restoration
+        product = await Product.findOne({
+          _id: item.productId,
           wholesaler: req.user.id
         });
+
+        if (!product) {
+          // Try finding by SKU for certified products
+          product = await Product.findOne({
+            sku: item.productId,
+            wholesaler: req.user.id
+          });
+        }
       }
 
       if (product) {
@@ -966,18 +1038,20 @@ router.delete('/:id', auth, async (req, res) => {
           productName: product.name,
           productId: product._id,
           restoredQuantity: item.quantity,
-          newQuantity: product.quantity
+          newQuantity: product.quantity,
+          productType: product.fromCertifiedOrder ? 'certified' : 'regular'
         });
         
-        console.log(`✅ Restored ${item.quantity} units of ${product.name}`);
+        console.log(`✅ Restored ${item.quantity} units of ${product.name} (${product.fromCertifiedOrder ? 'certified' : 'regular'})`);
       } else {
         restorationResults.push({
           productName: item.productName,
           productId: item.productId,
-          error: 'Product not found for restoration'
+          error: 'Product not found for restoration',
+          productType: item.isCertifiedProduct ? 'certified' : 'regular'
         });
         
-        console.log(`⚠️ Product not found for restoration: ${item.productName}`);
+        console.log(`⚠️ Product not found for restoration: ${item.productName} (${item.isCertifiedProduct ? 'certified' : 'regular'})`);
       }
     }
 
@@ -992,7 +1066,8 @@ router.delete('/:id', auth, async (req, res) => {
       deletedSale: {
         referenceNumber: wholesaleSale.referenceNumber,
         customerName: wholesaleSale.customerName,
-        grandTotal: wholesaleSale.grandTotal
+        grandTotal: wholesaleSale.grandTotal,
+        certifiedItems: wholesaleSale.items.filter(item => item.isCertifiedProduct).length
       }
     });
   } catch (error) {
@@ -1183,12 +1258,12 @@ router.get('/export/csv', auth, async (req, res) => {
       .sort({ saleDate: -1 });
 
     // Generate CSV header
-    let csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Unit Price,Total,Payment Method,Payment Status\n';
+    let csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Unit Price,Total,Payment Method,Payment Status,Certified\n';
     
     // Generate CSV rows
     sales.forEach(sale => {
       sale.items.forEach(item => {
-        csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.unitPrice},${item.total},"${sale.paymentMethod}","${sale.paymentStatus}"\n`;
+        csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.unitPrice},${item.total},"${sale.paymentMethod}","${sale.paymentStatus}","${item.isCertifiedProduct ? 'Yes' : 'No'}"\n`;
       });
     });
 
@@ -1233,7 +1308,8 @@ router.get('/products/popular', auth, async (req, res) => {
           productName: { $first: '$items.productName' },
           totalQuantity: { $sum: '$items.quantity' },
           totalRevenue: { $sum: '$items.total' },
-          saleCount: { $sum: 1 }
+          saleCount: { $sum: 1 },
+          isCertifiedProduct: { $first: '$items.isCertifiedProduct' }
         }
       },
       { $sort: { totalQuantity: -1 } },
@@ -1251,6 +1327,54 @@ router.get('/products/popular', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching popular products',
+      error: error.message
+    });
+  }
+});
+
+// ✅ NEW ENDPOINT: GET /api/wholesale-sales/certified-products/search - Search certified products
+router.get('/certified-products/search', auth, async (req, res) => {
+  try {
+    const { search, page = 1, limit = 10 } = req.query;
+    
+    const filter = {
+      $or: [
+        { fromCertifiedOrder: true },
+        { isCertifiedProduct: true }
+      ],
+      $or: [
+        { wholesaler: req.user.id },
+        { 'certifiedOrderSource.wholesalerId': req.user.id }
+      ]
+    };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const products = await Product.find(filter)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const total = await Product.countDocuments(filter);
+    
+    res.status(200).json({
+      success: true,
+      products,
+      totalPages: Math.ceil(total / limit),
+      currentPage: parseInt(page),
+      total
+    });
+    
+  } catch (error) {
+    console.error('Error searching certified products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error searching certified products',
       error: error.message
     });
   }

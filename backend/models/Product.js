@@ -379,12 +379,15 @@ productSchema.methods.generateSamplePriceHistory = function(userId, daysBack = 9
 
 // ==================== CERTIFIED ORDER METHODS ====================
 
-// Method to create products from certified orders
-productSchema.statics.createFromCertifiedOrder = async function(order, wholesalerId) {
+// Method to create products from certified orders WITH SELLING PRICES
+productSchema.statics.createFromCertifiedOrder = async function(order, wholesalerId, sellingPrices = {}) {
   try {
     const products = [];
     const SupplierProduct = mongoose.model('SupplierProduct');
     
+    console.log(`🔄 Creating products from certified order ${order.orderNumber} for wholesaler ${wholesalerId}`);
+    console.log('Received selling prices:', sellingPrices);
+
     for (const orderItem of order.items) {
       const supplierProduct = await SupplierProduct
         .findById(orderItem.product)
@@ -413,12 +416,28 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
         continue;
       }
 
+      // Calculate selling price - use provided price or default to cost price + 30%
+      const costPrice = orderItem.unitPrice;
+      let sellingPrice = sellingPrices[orderItem.product._id.toString()];
+      
+      if (sellingPrice === undefined || sellingPrice === null) {
+        sellingPrice = Math.round(costPrice * 1.3); // Default 30% markup
+        console.log(`📊 Using default selling price for product ${orderItem.product._id}: ${sellingPrice} (30% markup)`);
+      } else {
+        console.log(`📊 Using provided selling price for product ${orderItem.product._id}: ${sellingPrice}`);
+      }
+
+      // Validate selling price is not less than cost price
+      if (sellingPrice < costPrice) {
+        console.warn(`⚠️ Selling price (${sellingPrice}) is less than cost price (${costPrice}) for product ${orderItem.product._id}`);
+      }
+
       // Create new certified product
       const productData = {
         name: supplierProduct.name,
         description: supplierProduct.description || `Certified product from ${supplierProduct.supplier?.businessName || 'supplier'}`,
-        price: supplierProduct.sellingPrice,
-        costPrice: supplierProduct.sellingPrice, // Cost is what wholesaler paid
+        price: sellingPrice, // Use calculated selling price
+        costPrice: costPrice, // Cost is what wholesaler paid (unitPrice from order)
         quantity: orderItem.quantity,
         measurementUnit: supplierProduct.measurementUnit || 'units',
         category: supplierProduct.category || 'Certified Products',
@@ -433,16 +452,17 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
           certifiedAt: new Date()
         },
         priceHistory: [{
-          sellingPrice: supplierProduct.sellingPrice,
-          costPrice: supplierProduct.sellingPrice,
+          sellingPrice: sellingPrice,
+          costPrice: costPrice,
+          changedAt: new Date(),
           changedBy: wholesalerId,
           reason: 'Initial price from certified order',
           changeType: 'initial'
         }],
         priceStatistics: {
-          highestPrice: supplierProduct.sellingPrice,
-          lowestPrice: supplierProduct.sellingPrice,
-          averagePrice: supplierProduct.sellingPrice,
+          highestPrice: sellingPrice,
+          lowestPrice: sellingPrice,
+          averagePrice: sellingPrice,
           priceChangeCount: 1
         }
       };
@@ -450,12 +470,16 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
       const product = new this(productData);
       await product.save();
       products.push(product);
-      console.log(`Created certified product: ${product.name} (SKU: ${product.sku})`);
+      console.log(`✅ Created certified product: ${product.name} (SKU: ${product.sku})`, {
+        costPrice: product.costPrice,
+        sellingPrice: product.price,
+        quantity: product.quantity
+      });
     }
 
     return products;
   } catch (error) {
-    console.error('Error creating products from certified order:', error);
+    console.error('❌ Error creating products from certified order:', error);
     throw error;
   }
 };

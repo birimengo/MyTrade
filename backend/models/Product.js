@@ -171,16 +171,6 @@ const productSchema = new mongoose.Schema({
     },
     certifiedAt: {
       type: Date
-    },
-    originalUnitPrice: {
-      type: Number
-    },
-    isTemporary: {
-      type: Boolean,
-      default: false
-    },
-    originalProductId: {
-      type: String
     }
   },
   // Price Editing Tracking
@@ -215,11 +205,6 @@ const productSchema = new mongoose.Schema({
       type: Number,
       default: 0
     }
-  },
-  // Certified product specific fields
-  requiresPricing: {
-    type: Boolean,
-    default: false
   }
 }, {
   timestamps: true
@@ -305,11 +290,6 @@ productSchema.methods.updatePrice = function(newPrice, userId, reason = 'Price a
     this.price = newSellingPrice;
     this.priceManuallyEdited = changeType === 'manual';
     
-    // For certified products, mark as no longer requiring pricing
-    if (this.fromCertifiedOrder && this.requiresPricing && newSellingPrice > 0) {
-      this.requiresPricing = false;
-    }
-    
     // Update price statistics
     this.updatePriceStatistics();
 
@@ -335,114 +315,71 @@ productSchema.methods.updatePriceStatistics = function() {
   }
 };
 
-// ==================== ENHANCED CERTIFIED PRODUCT METHODS ====================
+// Method to generate sample price history for existing products
+productSchema.methods.generateSamplePriceHistory = function(userId, daysBack = 90) {
+  if (this.priceHistory.length <= 1) { // Only generate if minimal history exists
+    const sampleHistory = [];
+    const currentDate = new Date();
+    const costPrice = this.costPrice;
+    const currentPrice = this.price;
 
-// Enhanced method to find products for sales (both regular and certified)
-productSchema.statics.findProductForSale = async function(productId, wholesalerId, isCertified = false) {
-  try {
-    let product;
+    // Generate realistic price points over the specified days
+    const numberOfEntries = Math.floor(Math.random() * 8) + 5; // 5-12 entries
     
-    if (isCertified) {
-      console.log(`🔍 Searching for certified product: ${productId} for wholesaler: ${wholesalerId}`);
+    const reasons = [
+      'Market price adjustment',
+      'Supplier cost change',
+      'Seasonal pricing adjustment',
+      'Competitor price matching',
+      'Bulk discount implementation',
+      'Promotional pricing',
+      'Cost optimization',
+      'Demand-based pricing',
+      'Inventory clearance',
+      'New supplier pricing'
+    ];
+    
+    const changeTypes = ['market_adjustment', 'cost_change', 'promotional', 'auto_adjustment'];
+    
+    for (let i = 0; i < numberOfEntries; i++) {
+      const daysAgo = Math.floor(Math.random() * daysBack);
+      const historyDate = new Date(currentDate);
+      historyDate.setDate(historyDate.getDate() - daysAgo);
       
-      // ✅ CRITICAL FIX: Extract original ID from prefixed frontend ID
-      let originalProductId = productId;
-      if (typeof productId === 'string' && productId.startsWith('certified_')) {
-        originalProductId = productId.replace('certified_', '');
-        console.log(`🔄 Extracted original ID from prefixed ID: ${productId} -> ${originalProductId}`);
-      }
+      // Generate realistic price fluctuation (within 15-30% of current price)
+      const priceVariation = (Math.random() * 0.3) - 0.15;
+      const historicalPrice = currentPrice * (1 + priceVariation);
       
-      // ✅ ENHANCED SEARCH: Try multiple ID formats for certified products
-      product = await this.findOne({
-        $or: [
-          // Try the original extracted ID first
-          { _id: originalProductId, fromCertifiedOrder: true },
-          // Try the prefixed ID as fallback
-          { _id: productId, fromCertifiedOrder: true },
-          // Try SKU matching
-          { sku: originalProductId, fromCertifiedOrder: true },
-          { sku: productId, fromCertifiedOrder: true },
-          // Try name matching
-          { name: productId, fromCertifiedOrder: true },
-          // Try certified order source mapping
-          { 'certifiedOrderSource.originalProductId': originalProductId },
-          { 'certifiedOrderSource.originalProductId': productId }
-        ],
-        wholesaler: wholesalerId
+      // Ensure price is realistic (at least 5% above cost)
+      const finalPrice = Math.max(costPrice * 1.05, parseFloat(historicalPrice.toFixed(2)));
+      
+      const reasonIndex = Math.floor(Math.random() * reasons.length);
+      const changeTypeIndex = Math.floor(Math.random() * changeTypes.length);
+      
+      sampleHistory.push({
+        sellingPrice: finalPrice,
+        costPrice: costPrice,
+        changedAt: historyDate,
+        changedBy: userId,
+        reason: reasons[reasonIndex],
+        changeType: changeTypes[changeTypeIndex],
+        note: `Auto-generated sample data`
       });
-
-      // ✅ BROADER SEARCH: If still not found, try broader search
-      if (!product) {
-        console.log('🔄 Trying broader certified product search...');
-        product = await this.findOne({
-          fromCertifiedOrder: true,
-          $or: [
-            { name: { $regex: productId, $options: 'i' } },
-            { sku: { $regex: productId, $options: 'i' } },
-            { name: { $regex: originalProductId, $options: 'i' } }
-          ],
-          wholesaler: wholesalerId
-        });
-      }
-
-      // ✅ LAST RESORT: Create temporary product if still not found
-      if (!product) {
-        console.log('⚠️ Certified product not found, creating temporary record...');
-        const tempSku = `TEMP-CERT-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-        product = new this({
-          name: `Certified Product - ${productId}`,
-          sku: tempSku,
-          price: 0, // Will be set during sale
-          costPrice: 0, // Unknown cost
-          quantity: 999, // Large quantity to avoid stock issues
-          measurementUnit: 'units',
-          category: 'Certified Products',
-          fromCertifiedOrder: true,
-          requiresPricing: true,
-          wholesaler: wholesalerId,
-          isActive: true,
-          certifiedOrderSource: {
-            isTemporary: true,
-            originalProductId: productId,
-            certifiedAt: new Date()
-          }
-        });
-        await product.save();
-        console.log(`✅ Created temporary certified product: ${product.name} (SKU: ${product.sku})`);
-      }
-    } else {
-      // Regular product search
-      product = await this.findOne({
-        _id: productId,
-        wholesaler: wholesalerId
-      });
-
-      // Fallback search for regular products
-      if (!product) {
-        product = await this.findOne({
-          $or: [
-            { sku: productId },
-            { name: productId }
-          ],
-          wholesaler: wholesalerId
-        });
-      }
     }
 
-    if (product) {
-      console.log(`✅ Found product: ${product.name} (ID: ${product._id}, Certified: ${product.fromCertifiedOrder})`);
-    } else {
-      console.log(`❌ Product not found: ${productId} (Certified: ${isCertified})`);
-    }
-
-    return product;
-  } catch (error) {
-    console.error('Error in findProductForSale:', error);
-    throw error;
+    // Sort by date (oldest first) and add to history
+    sampleHistory.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
+    this.priceHistory = [...sampleHistory, ...this.priceHistory];
+    
+    // Update statistics
+    this.updatePriceStatistics();
+    this.priceStatistics.priceChangeCount += sampleHistory.length;
   }
 };
 
-// Enhanced method to create certified products from orders
+// ==================== CERTIFIED ORDER METHODS ====================
+
+// Method to create products from certified orders
 productSchema.statics.createFromCertifiedOrder = async function(order, wholesalerId) {
   try {
     const products = [];
@@ -468,19 +405,20 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
       });
 
       if (existingProduct) {
-        console.log(`🔄 Certified product already exists, updating quantity: ${certifiedSku}`);
+        console.log(`Certified product already exists: ${certifiedSku}`);
+        // Update quantity if product already exists
         existingProduct.quantity += orderItem.quantity;
         await existingProduct.save();
         products.push(existingProduct);
         continue;
       }
 
-      // Create new certified product with proper pricing structure
+      // Create new certified product
       const productData = {
         name: supplierProduct.name,
         description: supplierProduct.description || `Certified product from ${supplierProduct.supplier?.businessName || 'supplier'}`,
-        price: 0, // Start with 0 - wholesaler will set selling price manually
-        costPrice: orderItem.unitPrice, // Cost is what wholesaler paid to supplier
+        price: supplierProduct.sellingPrice,
+        costPrice: supplierProduct.sellingPrice, // Cost is what wholesaler paid
         quantity: orderItem.quantity,
         measurementUnit: supplierProduct.measurementUnit || 'units',
         category: supplierProduct.category || 'Certified Products',
@@ -489,40 +427,91 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
         wholesaler: wholesalerId,
         sku: certifiedSku,
         fromCertifiedOrder: true,
-        requiresPricing: true, // Flag to indicate selling price needs to be set
         certifiedOrderSource: {
           orderId: order._id,
           supplierId: supplierProduct.supplier?._id,
-          certifiedAt: new Date(),
-          originalUnitPrice: orderItem.unitPrice
+          certifiedAt: new Date()
         },
         priceHistory: [{
-          sellingPrice: 0, // Initial selling price (to be set by wholesaler)
-          costPrice: orderItem.unitPrice,
-          changedAt: new Date(),
+          sellingPrice: supplierProduct.sellingPrice,
+          costPrice: supplierProduct.sellingPrice,
           changedBy: wholesalerId,
-          reason: 'Initial certification from supplier order',
-          changeType: 'initial',
-          note: 'Selling price to be set manually by wholesaler'
+          reason: 'Initial price from certified order',
+          changeType: 'initial'
         }],
         priceStatistics: {
-          highestPrice: 0,
-          lowestPrice: 0,
-          averagePrice: 0,
+          highestPrice: supplierProduct.sellingPrice,
+          lowestPrice: supplierProduct.sellingPrice,
+          averagePrice: supplierProduct.sellingPrice,
           priceChangeCount: 1
         }
       };
 
       const product = new this(productData);
       await product.save();
-      
-      console.log(`✅ Created certified product: ${product.name} (SKU: ${product.sku})`);
       products.push(product);
+      console.log(`Created certified product: ${product.name} (SKU: ${product.sku})`);
     }
 
     return products;
   } catch (error) {
     console.error('Error creating products from certified order:', error);
+    throw error;
+  }
+};
+
+// Method to update stock from certified orders
+productSchema.statics.updateStockFromCertifiedOrder = async function(orderId, wholesalerId) {
+  try {
+    const WholesalerOrderToSupplier = mongoose.model('WholesalerOrderToSupplier');
+    const order = await WholesalerOrderToSupplier
+      .findById(orderId)
+      .populate('items.product');
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    if (order.status !== 'certified') {
+      throw new Error('Order is not certified');
+    }
+
+    const updatedProducts = [];
+
+    for (const orderItem of order.items) {
+      if (!orderItem.product) {
+        console.log(`Order item product not populated: ${orderItem._id}`);
+        continue;
+      }
+
+      const certifiedSku = `CERT-${order.orderNumber}-${orderItem.product.sku || orderItem.product._id.toString().slice(-6)}`;
+      
+      // Find the certified product
+      const product = await this.findOne({
+        sku: certifiedSku,
+        wholesaler: wholesalerId
+      });
+
+      if (product) {
+        // Update quantity - add the ordered quantity
+        const oldQuantity = product.quantity;
+        product.quantity += orderItem.quantity;
+        await product.save();
+        updatedProducts.push({
+          product: product,
+          oldQuantity: oldQuantity,
+          newQuantity: product.quantity,
+          added: orderItem.quantity
+        });
+        console.log(`Updated stock for ${product.name}: ${oldQuantity} -> ${product.quantity}`);
+      } else {
+        console.log(`Certified product not found: ${certifiedSku}`);
+      }
+    }
+
+    return updatedProducts;
+  } catch (error) {
+    console.error('Error updating stock from certified order:', error);
     throw error;
   }
 };
@@ -650,8 +639,7 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
     lowStockCertifiedProducts: 0,
     outOfStockCertifiedProducts: 0,
     certifiedProductsBySupplier: {},
-    averageProfitMargin: 0,
-    productsRequiringPricing: 0
+    averageProfitMargin: 0
   };
 
   certifiedProducts.forEach(product => {
@@ -669,10 +657,6 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
 
     if (product.quantity === 0) {
       analytics.outOfStockCertifiedProducts++;
-    }
-
-    if (product.requiresPricing) {
-      analytics.productsRequiringPricing++;
     }
 
     // Group by supplier
@@ -693,6 +677,8 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
 
   return analytics;
 };
+
+// ==================== END CERTIFIED ORDER METHODS ====================
 
 // Pre-save middleware
 productSchema.pre('save', function(next) {
@@ -751,6 +737,5 @@ productSchema.index({ 'priceHistory.changedAt': -1 });
 productSchema.index({ 'priceStatistics.priceChangeCount': -1 });
 productSchema.index({ 'certifiedOrderSource.orderId': 1 });
 productSchema.index({ 'certifiedOrderSource.supplierId': 1 });
-productSchema.index({ requiresPricing: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

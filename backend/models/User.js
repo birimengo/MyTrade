@@ -237,7 +237,43 @@ const userSchema = new mongoose.Schema({
   marketingEmails: {
     type: Boolean,
     default: false
+  },
+
+  // ==============================================
+  // NEW: WhatsApp Notification Settings (ADDED)
+  // ==============================================
+  notificationPreferences: {
+    whatsapp: {
+      enabled: { type: Boolean, default: false },
+      apiKey: { type: String, trim: true, default: '' },
+      phoneNumber: { type: String, trim: true, default: '' },
+      activatedAt: { type: Date },
+      lastTested: { type: Date }
+    },
+    email: { type: Boolean, default: true },
+    push: { type: Boolean, default: true },
+    sms: { type: Boolean, default: false }
+  },
+  
+  // NEW: Reminder timing preferences
+  reminderSettings: {
+    advanceNotice: { 
+      type: String, 
+      enum: ['15min', '30min', '1hour', '2hours', '1day'],
+      default: '30min'
+    },
+    workingHours: {
+      start: { type: String, default: '09:00' },
+      end: { type: String, default: '18:00' },
+      timezone: { type: String, default: 'UTC' }
+    },
+    quietMode: {
+      enabled: { type: Boolean, default: false },
+      start: { type: String, default: '22:00' },
+      end: { type: String, default: '07:00' }
+    }
   }
+
 }, {
   timestamps: true,
   strict: true
@@ -270,12 +306,34 @@ userSchema.methods.isBusiness = function() {
   return ['retailer', 'wholesaler', 'supplier'].includes(this.role);
 };
 
+// NEW: Method to check if WhatsApp notifications are enabled
+userSchema.methods.hasWhatsAppEnabled = function() {
+  return this.notificationPreferences?.whatsapp?.enabled === true && 
+         this.notificationPreferences.whatsapp.apiKey && 
+         this.notificationPreferences.whatsapp.phoneNumber;
+};
+
+// NEW: Method to get WhatsApp settings
+userSchema.methods.getWhatsAppSettings = function() {
+  if (!this.hasWhatsAppEnabled()) {
+    return null;
+  }
+  
+  return {
+    enabled: true,
+    apiKey: this.notificationPreferences.whatsapp.apiKey,
+    phoneNumber: this.notificationPreferences.whatsapp.phoneNumber,
+    activatedAt: this.notificationPreferences.whatsapp.activatedAt
+  };
+};
+
 // Transform output to include virtuals and remove sensitive data
 userSchema.set('toJSON', {
   virtuals: true,
   transform: function(doc, ret) {
     delete ret.password;
     delete ret.__v;
+    // Keep notification preferences in output
     return ret;
   }
 });

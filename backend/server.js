@@ -38,15 +38,18 @@ const supplierProductsRoutes = require('./routes/supplierProducts');
 const wholesalerOrdersRoutes = require('./routes/wholesalerOrdersToSupplierRoute');
 const supplierReceiptRoutes = require('./routes/supplierReceiptRoute');
 const certifiedProductsRoutes = require('./routes/certifiedProducts');
-
+const userSettingsRoutes = require('./routes/userSettings');
 const wholesaleSalesRoutes = require('./routes/wholesaleSales');
 const customerRoutes = require('./routes/customers');
 const certifiedOrdersRoutes = require('./routes/certifiedOrders');
 const certifiedStockRoutes = require('./routes/certifiedStock');
 
-
 // Import password reset routes
 const authControllerRoutes = require('./routes/authController');
+
+// NEW: Import TODO and Reminder routes and services
+const todoRoutes = require('./routes/todo');
+const reminderService = require('./services/reminderService');
 
 // SAFE IMPORT FOR RETAILER ORDERS (prevents crash if file doesn't exist)
 let retailerOrderRoutes;
@@ -211,8 +214,12 @@ app.use('/api/wholesale-sales', wholesaleSalesRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/certified-orders', certifiedOrdersRoutes);
 app.use('/api/certified-stock', certifiedStockRoutes);
-// NEW: React Native specific endpoints
+app.use('/api/user', userSettingsRoutes);
 
+// NEW: TODO and Reminder routes
+app.use('/api/todo', todoRoutes);
+
+// NEW: React Native specific endpoints
 app.get('/api/react-native-test', (req, res) => {
   const clientInfo = {
     userAgent: req.headers['user-agent'],
@@ -251,7 +258,9 @@ app.get('/api/env-check', (req, res) => {
       socket: true,
       fileUpload: true,
       realTimeChat: true,
-      notifications: true
+      notifications: true,
+      todoSystem: true,
+      reminderSystem: true
     }
   });
 });
@@ -273,13 +282,16 @@ app.get('/api/mobile-diagnostics', async (req, res) => {
       },
       services: {
         cloudinary: process.env.CLOUDINARY_URL ? 'available' : 'unavailable',
-        socket: 'available'
+        socket: 'available',
+        todoSystem: 'available',
+        reminderSystem: 'available'
       },
       endpoints: {
         auth: '/api/auth',
         users: '/api/users',
         conversations: '/api/conversations',
         messages: '/api/messages',
+        todo: '/api/todo',
         health: '/api/health'
       }
     };
@@ -319,6 +331,53 @@ app.get('/api/socket-test', (req, res) => {
   });
 });
 
+// NEW: TODO System test endpoint
+app.get('/api/test-todo-system', async (req, res) => {
+  try {
+    const todoStats = {
+      system: 'TODO & Reminder System',
+      status: 'active',
+      features: [
+        'Task management',
+        'Reminder scheduling',
+        'WhatsApp notifications via CallMeBot',
+        'Overdue task tracking',
+        'Priority levels',
+        'Categories and tags',
+        'Statistics and analytics'
+      ],
+      endpoints: {
+        getAll: 'GET /api/todo',
+        create: 'POST /api/todo',
+        update: 'PUT /api/todo/:id',
+        delete: 'DELETE /api/todo/:id',
+        stats: 'GET /api/todo/stats/summary',
+        overdue: 'GET /api/todo/overdue',
+        upcoming: 'GET /api/todo/upcoming',
+        reminders: 'GET /api/todo/reminders/upcoming'
+      },
+      reminderService: {
+        status: 'running',
+        checkInterval: '5 minutes',
+        overdueCheckInterval: '1 hour',
+        whatsappIntegration: process.env.CALLMEBOT_API_KEY ? 'configured' : 'not configured'
+      }
+    };
+
+    res.json({
+      success: true,
+      message: 'TODO system is active and running',
+      ...todoStats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'TODO system test failed',
+      error: error.message
+    });
+  }
+});
+
 // Enhanced health check endpoint with detailed diagnostics
 app.get('/api/health', async (req, res) => {
   try {
@@ -333,6 +392,7 @@ app.get('/api/health', async (req, res) => {
     };
     
     let cloudinaryStatus = process.env.CLOUDINARY_URL ? 'configured' : 'not configured';
+    let todoSystemStatus = 'available';
     
     // Check database connection
     if (mongoose.connection.readyState === 1) {
@@ -389,6 +449,7 @@ app.get('/api/health', async (req, res) => {
       database: databaseInfo,
       databaseTest: dbTest,
       cloudinary: cloudinaryStatus,
+      todoSystem: todoSystemStatus,
       memory: {
         used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
         total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
@@ -404,7 +465,10 @@ app.get('/api/health', async (req, res) => {
         realTimeChat: true,
         fileUpload: true,
         notifications: true,
-        multiPlatform: true
+        multiPlatform: true,
+        todoManagement: true,
+        reminderSystem: true,
+        whatsappNotifications: process.env.CALLMEBOT_API_KEY ? true : false
       },
       routes: [
         '/api/auth',
@@ -416,12 +480,14 @@ app.get('/api/health', async (req, res) => {
         '/api/products',
         '/api/retailer-orders',
         '/api/transporters',
+        '/api/todo',
         '/api/health',
         '/api/test-db',
         '/api/test-mongodb',
         '/api/react-native-test',
         '/api/mobile-diagnostics',
-        '/api/socket-test'
+        '/api/socket-test',
+        '/api/test-todo-system'
       ]
     });
   } catch (error) {
@@ -520,6 +586,15 @@ app.get('/api/test-db', async (req, res) => {
     } catch (orderError) {
       console.log('RetailerOrder collection not available yet');
     }
+
+    // Test TODO collection if it exists
+    let todosCount = 0;
+    try {
+      const Todo = require('./models/Todo');
+      todosCount = await Todo.countDocuments();
+    } catch (todoError) {
+      console.log('Todo collection not available yet');
+    }
     
     res.json({
       success: true,
@@ -530,10 +605,11 @@ app.get('/api/test-db', async (req, res) => {
         users: usersCount,
         conversations: conversationsCount,
         messages: messagesCount,
-        orders: ordersCount
+        orders: ordersCount,
+        todos: todosCount
       },
       performance: {
-        totalRecords: usersCount + conversationsCount + messagesCount + ordersCount
+        totalRecords: usersCount + conversationsCount + messagesCount + ordersCount + todosCount
       }
     });
   } catch (error) {
@@ -860,8 +936,89 @@ app.get('/api/test-password-reset', async (req, res) => {
   }
 });
 
+// NEW: Test TODO system endpoint
+app.get('/api/test-todo', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected',
+        error: 'Cannot test TODO system without database connection'
+      });
+    }
+
+    const token = req.headers.authorization;
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization token required for TODO system test'
+      });
+    }
+    
+    console.log('Testing TODO system endpoint');
+    
+    res.json({
+      success: true,
+      message: 'TODO system is available',
+      endpoints: {
+        getAll: 'GET /api/todo',
+        create: 'POST /api/todo',
+        update: 'PUT /api/todo/:id',
+        delete: 'DELETE /api/todo/:id',
+        stats: 'GET /api/todo/stats/summary',
+        overdue: 'GET /api/todo/overdue',
+        upcoming: 'GET /api/todo/upcoming',
+        reminders: 'GET /api/todo/reminders/upcoming'
+      },
+      features: {
+        taskManagement: true,
+        reminderSystem: true,
+        whatsappNotifications: process.env.CALLMEBOT_API_KEY ? true : false,
+        categories: true,
+        priorities: true,
+        statistics: true
+      }
+    });
+  } catch (error) {
+    console.error('Test TODO error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to test TODO system',
+      error: error.message
+    });
+  }
+});
+
 // Use the enhanced socket handler
 handleSocketConnection(io);
+
+// NEW: Initialize Reminder System
+function initializeReminderSystem() {
+  console.log('🔄 Initializing reminder system...');
+  
+  // Check reminders every 5 minutes
+  setInterval(() => {
+    reminderService.checkReminders();
+  }, 5 * 60 * 1000);
+
+  // Check overdue todos every hour
+  setInterval(() => {
+    reminderService.checkOverdueTodos();
+  }, 60 * 60 * 1000);
+
+  // Initial check after 30 seconds (wait for DB connection)
+  setTimeout(() => {
+    console.log('🔄 Running initial reminder check...');
+    reminderService.checkReminders();
+    reminderService.checkOverdueTodos();
+  }, 30000);
+
+  console.log('✅ Reminder system initialized');
+  console.log('   - Reminder checks: every 5 minutes');
+  console.log('   - Overdue checks: every hour');
+  console.log('   - WhatsApp integration:', process.env.CALLMEBOT_API_KEY ? 'Enabled' : 'Disabled');
+}
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -879,6 +1036,7 @@ app.use('*', (req, res) => {
       '/api/products/*',
       '/api/retailer-orders/*',
       '/api/transporters/*',
+      '/api/todo/*',
       '/api/health',
       '/api/test-db',
       '/api/test-message',
@@ -889,6 +1047,8 @@ app.use('*', (req, res) => {
       '/api/test-transporter-status',
       '/api/test-orders',
       '/api/test-password-reset',
+      '/api/test-todo',
+      '/api/test-todo-system',
       '/api/react-native-test',
       '/api/mobile-diagnostics',
       '/api/socket-test',
@@ -994,6 +1154,9 @@ const startServer = async () => {
     if (isConnected) {
       console.log(`🗄️  MongoDB connected: ${mongoose.connection.name}`);
       console.log(`🔗 Connection State: ${getMongooseReadyState(mongoose.connection.readyState)}`);
+      
+      // Initialize reminder system after successful DB connection
+      initializeReminderSystem();
     } else {
       console.log(`⚠️  MongoDB: NOT CONNECTED (running in limited mode)`);
       console.log(`💡 Some features requiring database access will not work`);
@@ -1005,10 +1168,12 @@ const startServer = async () => {
     console.log(`   - Products: /api/products`);
     console.log(`   - Retailer Orders: /api/retailer-orders`);
     console.log(`   - Transporters: /api/transporters`);
+    console.log(`   - TODO System: /api/todo`);
     console.log(`   - Password Reset: /api/auth/forgot-password`);
     console.log(`   - System Health: /api/health`);
     console.log(`   - React Native Test: /api/react-native-test`);
     console.log(`   - Mobile Diagnostics: /api/mobile-diagnostics`);
+    console.log(`   - TODO System Test: /api/test-todo-system`);
   });
 };
 

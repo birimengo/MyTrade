@@ -7,8 +7,8 @@ class ReminderService {
       const now = new Date();
       console.log(`[${now.toISOString()}] Checking for reminders...`);
 
-      // Get todos with reminders due in the next 30 minutes
-      const upcomingReminders = await Todo.getUpcomingReminders(30);
+      // Get todos with reminders due in the next 5 minutes
+      const upcomingReminders = await Todo.getUpcomingReminders(5);
       
       console.log(`Found ${upcomingReminders.length} reminders to send`);
 

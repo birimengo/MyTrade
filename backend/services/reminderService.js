@@ -1,21 +1,20 @@
 // services/reminderService.js
-const cron = require('node-cron');
 const Todo = require('../models/Todo');
 const User = require('../models/User');
 const whatsappService = require('./whatsappService');
-const axios = require('axios');
 
 class ReminderService {
   constructor() {
     this.isRunning = false;
+    this.intervalId = null;
     this.init();
   }
 
   init() {
     console.log('🔄 Initializing Reminder Service...');
     
-    // Check every minute for due reminders
-    cron.schedule('* * * * *', async () => {
+    // Use setInterval instead of node-cron
+    this.intervalId = setInterval(async () => {
       if (this.isRunning) {
         console.log('⏳ Reminder service already running, skipping...');
         return;
@@ -29,16 +28,16 @@ class ReminderService {
       } finally {
         this.isRunning = false;
       }
-    });
+    }, 60000); // Check every minute
 
     // Additional check every 5 minutes for any missed reminders
-    cron.schedule('*/5 * * * *', async () => {
+    setInterval(async () => {
       try {
         await this.checkMissedReminders();
       } catch (error) {
         console.error('❌ Error in missed reminders check:', error);
       }
-    });
+    }, 300000); // Check every 5 minutes
 
     console.log('✅ Reminder Service Started - Running every minute');
   }
@@ -285,6 +284,14 @@ Mark as completed in your TODO app! ✅`;
       pendingReminders: pendingCount,
       nextCheck: new Date(now.getTime() + 60000) // 1 minute from now
     };
+  }
+
+  // Cleanup method to stop intervals
+  stop() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
   }
 }
 

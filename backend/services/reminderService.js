@@ -1,300 +1,228 @@
-// services/reminderService.js
 const Todo = require('../models/Todo');
-const User = require('../models/User');
-const whatsappService = require('./whatsappService');
+const unifiedSmsService = require('./unifiedSmsService');
 
 class ReminderService {
-  constructor() {
-    this.isRunning = false;
-    this.intervalId = null;
-    this.init();
-  }
-
-  init() {
-    console.log('🔄 Initializing Reminder Service...');
-    
-    // Use setInterval instead of node-cron
-    this.intervalId = setInterval(async () => {
-      if (this.isRunning) {
-        console.log('⏳ Reminder service already running, skipping...');
-        return;
-      }
-      
-      this.isRunning = true;
-      try {
-        await this.checkAndSendReminders();
-      } catch (error) {
-        console.error('❌ Error in reminder service:', error);
-      } finally {
-        this.isRunning = false;
-      }
-    }, 60000); // Check every minute
-
-    // Additional check every 5 minutes for any missed reminders
-    setInterval(async () => {
-      try {
-        await this.checkMissedReminders();
-      } catch (error) {
-        console.error('❌ Error in missed reminders check:', error);
-      }
-    }, 300000); // Check every 5 minutes
-
-    console.log('✅ Reminder Service Started - Running every minute');
-  }
-
-  async checkAndSendReminders() {
-    const now = new Date();
-    console.log(`\n🔔 [${now.toISOString()}] Checking for reminders...`);
-
+  async checkReminders() {
     try {
-      // Get todos that need reminders
-      const pendingReminders = await Todo.getPendingReminders();
+      const now = new Date();
+      console.log(`[${now.toISOString()}] Checking for reminders...`);
+
+      // Get todos with reminders due in the next 30 minutes
+      const upcomingReminders = await Todo.getUpcomingReminders(30);
       
-      console.log(`📋 Found ${pendingReminders.length} pending reminders`);
+      console.log(`Found ${upcomingReminders.length} reminders to send`);
 
-      let whatsappSent = 0;
-      let whatsappFailed = 0;
-      let regularSent = 0;
+      let sentCount = 0;
+      let failedCount = 0;
 
-      for (const todo of pendingReminders) {
+      for (const todo of upcomingReminders) {
         try {
-          // Check if this is a WhatsApp reminder
-          if (todo.shouldSendWhatsAppReminder() && todo.user && todo.user.hasWhatsAppEnabled()) {
-            const result = await this.sendWhatsAppReminder(todo);
-            
-            if (result.success) {
-              await todo.markWhatsAppReminderSent();
-              await todo.user.updateWhatsAppStats(true);
-              whatsappSent++;
-              console.log(`✅ WhatsApp reminder sent for: "${todo.title}"`);
-            } else {
-              whatsappFailed++;
-              await todo.user.updateWhatsAppStats(false, result.error);
-              console.log(`❌ WhatsApp failed for: "${todo.title}" - ${result.error}`);
-            }
-          }
+          const result = await this.sendReminder(todo);
           
-          // Check if this is a regular reminder (for other notification methods)
-          if (todo.shouldSendReminder()) {
-            // Here you can add email, push notifications, etc.
-            await todo.markReminderSent();
-            regularSent++;
-            console.log(`📧 Regular reminder sent for: "${todo.title}"`);
+          if (result.success) {
+            // Mark as sent in database
+            await Todo.findByIdAndUpdate(todo._id, {
+              reminderSent: true,
+              lastReminderSent: new Date()
+            });
+            sentCount++;
+            console.log(`✅ Reminder sent for: "${todo.title}"`);
+          } else {
+            failedCount++;
+            console.log(`❌ Failed to send reminder for: "${todo.title}" - ${result.error}`);
           }
-
         } catch (error) {
-          console.error(`💥 Error processing reminder for todo ${todo._id}:`, error);
+          failedCount++;
+          console.error(`❌ Error sending reminder for todo ${todo._id}:`, error);
         }
       }
 
-      console.log(`📊 Reminder Summary:
-        ✅ WhatsApp Sent: ${whatsappSent}
-        ❌ WhatsApp Failed: ${whatsappFailed}
-        📧 Regular Sent: ${regularSent}
-        📝 Total Processed: ${pendingReminders.length}
-      `);
+      console.log(`Reminder check completed: ${sentCount} sent, ${failedCount} failed`);
+      return { sentCount, failedCount, total: upcomingReminders.length };
 
     } catch (error) {
-      console.error('💥 Error in checkAndSendReminders:', error);
+      console.error('Error in reminder service:', error);
       throw error;
     }
   }
 
-  async sendWhatsAppReminder(todo) {
+  // ADD THIS METHOD TO FIX THE ERROR
+  async checkAndSendReminders() {
+    console.log('🔄 Using checkAndSendReminders() - redirecting to checkReminders()');
+    return await this.checkReminders();
+  }
+
+  async sendReminder(todo) {
     const user = todo.user;
     
-    if (!user || !user.hasWhatsAppEnabled()) {
+    // Check if user has WhatsApp enabled and configured
+    if (!user.notificationPreferences?.whatsapp?.enabled) {
       return {
         success: false,
-        error: 'User not found or WhatsApp not enabled',
+        error: 'WhatsApp notifications not enabled for user',
+        serviceUsed: 'none'
+      };
+    }
+
+    const whatsappSettings = user.notificationPreferences.whatsapp;
+    
+    if (!whatsappSettings.phoneNumber || !whatsappSettings.apiKey) {
+      return {
+        success: false,
+        error: 'WhatsApp not properly configured for user',
         serviceUsed: 'none'
       };
     }
 
     try {
-      const whatsappSettings = user.getWhatsAppSettings();
-      const message = this.formatWhatsAppMessage(todo);
-      
-      const result = await whatsappService.sendMessage(
-        whatsappSettings.phoneNumber,
-        message,
-        whatsappSettings.apiKey
+      const userPreferences = {
+        whatsappEnabled: true,
+        whatsappApiKey: whatsappSettings.apiKey
+      };
+
+      const result = await unifiedSmsService.sendReminder(
+        whatsappSettings.phoneNumber, 
+        todo, 
+        userPreferences
       );
-
-      return {
-        success: result.success,
-        error: result.error,
-        serviceUsed: 'whatsapp',
-        messageId: result.messageId
-      };
-
-    } catch (error) {
-      console.error('💥 Error in sendWhatsAppReminder:', error);
-      return {
-        success: false,
-        error: error.message,
-        serviceUsed: 'whatsapp'
-      };
-    }
-  }
-
-  formatWhatsAppMessage(todo) {
-    const dueDate = todo.dueDate ? new Date(todo.dueDate).toLocaleDateString('en-US', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }) : 'No due date set';
-    
-    const priorityEmoji = {
-      'low': '🔵',
-      'medium': '🟡', 
-      'high': '🟠',
-      'urgent': '🔴'
-    }[todo.priority] || '⚪';
-
-    return `🔔 *TODO REMINDER*
-
-*Task:* ${todo.title}
-${todo.description ? `*Description:* ${todo.description}\n` : ''}
-*Due:* ${dueDate}
-*Priority:* ${priorityEmoji} ${todo.priority.toUpperCase()}
-*Category:* ${todo.category}
-*Status:* ${todo.status.replace('-', ' ').toUpperCase()}
-
-⏰ Reminder sent: ${new Date().toLocaleString()}
-
-Mark as completed in your TODO app! ✅`;
-  }
-
-  async checkMissedReminders() {
-    console.log('🔍 Checking for missed reminders...');
-    
-    try {
-      // Find reminders that should have been sent but weren't (last 30 minutes)
-      const cutoffTime = new Date(Date.now() - 30 * 60 * 1000);
-      
-      const missedReminders = await Todo.find({
-        reminderDate: { 
-          $lte: cutoffTime,
-          $gte: new Date(Date.now() - 2 * 60 * 60 * 1000) // Last 2 hours
-        },
-        $or: [
-          { reminderSent: false },
-          { whatsappReminderSent: false }
-        ],
-        status: { $in: ['pending', 'in-progress'] }
-      }).populate('user');
-
-      console.log(`📋 Found ${missedReminders.length} potentially missed reminders`);
-
-      for (const todo of missedReminders) {
-        try {
-          // Only send WhatsApp for missed reminders if user has it enabled
-          if (!todo.whatsappReminderSent && todo.user && todo.user.hasWhatsAppEnabled()) {
-            const result = await this.sendWhatsAppReminder(todo);
-            
-            if (result.success) {
-              await todo.markWhatsAppReminderSent();
-              console.log(`✅ Sent missed WhatsApp reminder for: "${todo.title}"`);
-            }
-          }
-        } catch (error) {
-          console.error(`❌ Error sending missed reminder for ${todo._id}:`, error);
-        }
-      }
-
-    } catch (error) {
-      console.error('💥 Error in checkMissedReminders:', error);
-    }
-  }
-
-  async sendTestReminder(userId, todoId = null) {
-    try {
-      let todo;
-      
-      if (todoId) {
-        // Send reminder for specific todo
-        todo = await Todo.findOne({
-          _id: todoId,
-          user: userId
-        }).populate('user');
-        
-        if (!todo) {
-          throw new Error('Todo not found');
-        }
-      } else {
-        // Create a test todo
-        const user = await User.findById(userId);
-        if (!user) {
-          throw new Error('User not found');
-        }
-
-        todo = new Todo({
-          title: "TEST REMINDER - " + new Date().toLocaleTimeString(),
-          description: "This is a test reminder to verify WhatsApp integration",
-          category: "general",
-          priority: "high",
-          status: "pending",
-          dueDate: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes from now
-          reminderDate: new Date(),
-          user: userId
-        });
-
-        await todo.save();
-        await todo.populate('user');
-      }
-
-      console.log(`🧪 Sending test reminder for user: ${todo.user.email}`);
-      
-      const result = await this.sendWhatsAppReminder(todo);
-      
-      if (result.success && !todoId) {
-        // Clean up test todo
-        await Todo.findByIdAndDelete(todo._id);
-      }
 
       return result;
 
     } catch (error) {
-      console.error('💥 Error in sendTestReminder:', error);
+      console.error('Error in sendReminder:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        serviceUsed: 'none'
       };
     }
   }
 
-  async getServiceStatus() {
-    const now = new Date();
-    const pendingCount = await Todo.countDocuments({
-      reminderDate: { $lte: now },
-      $or: [
-        { reminderSent: false },
-        { whatsappReminderSent: false }
-      ],
-      status: { $in: ['pending', 'in-progress'] }
-    });
+  async checkOverdueTodos() {
+    try {
+      const now = new Date();
+      console.log(`[${now.toISOString()}] Checking for overdue todos...`);
 
-    return {
-      isRunning: this.isRunning,
-      lastCheck: now,
-      pendingReminders: pendingCount,
-      nextCheck: new Date(now.getTime() + 60000) // 1 minute from now
-    };
+      const overdueTodos = await Todo.getOverdueTodos();
+
+      let alertedCount = 0;
+      let failedCount = 0;
+
+      for (const todo of overdueTodos) {
+        // Only send overdue alert once per day
+        const lastAlert = todo.lastReminderSent;
+        const shouldAlert = !lastAlert || 
+          (new Date() - new Date(lastAlert)) > 24 * 60 * 60 * 1000;
+
+        if (shouldAlert) {
+          try {
+            const result = await this.sendOverdueAlert(todo);
+            
+            if (result.success) {
+              await Todo.findByIdAndUpdate(todo._id, {
+                lastReminderSent: new Date()
+              });
+              alertedCount++;
+              console.log(`⚠️ Overdue alert sent for: "${todo.title}"`);
+            } else {
+              failedCount++;
+              console.log(`❌ Failed to send overdue alert for: "${todo.title}"`);
+            }
+          } catch (error) {
+            failedCount++;
+            console.error(`❌ Error sending overdue alert for todo ${todo._id}:`, error);
+          }
+        }
+      }
+
+      console.log(`Overdue check completed: ${alertedCount} alerted, ${failedCount} failed`);
+      return { alertedCount, failedCount, total: overdueTodos.length };
+
+    } catch (error) {
+      console.error('Error checking overdue todos:', error);
+      throw error;
+    }
   }
 
-  // Cleanup method to stop intervals
-  stop() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+  async sendOverdueAlert(todo) {
+    const user = todo.user;
+    
+    // Check if user has WhatsApp enabled and configured
+    if (!user.notificationPreferences?.whatsapp?.enabled) {
+      return {
+        success: false,
+        error: 'WhatsApp notifications not enabled for user',
+        serviceUsed: 'none'
+      };
     }
+
+    const whatsappSettings = user.notificationPreferences.whatsapp;
+    
+    if (!whatsappSettings.phoneNumber || !whatsappSettings.apiKey) {
+      return {
+        success: false,
+        error: 'WhatsApp not properly configured for user',
+        serviceUsed: 'none'
+      };
+    }
+
+    try {
+      const userPreferences = {
+        whatsappEnabled: true,
+        whatsappApiKey: whatsappSettings.apiKey
+      };
+
+      // Create a modified todo for overdue message
+      const overdueTodo = {
+        ...todo.toObject(),
+        isOverdue: true
+      };
+
+      const result = await unifiedSmsService.sendReminder(
+        whatsappSettings.phoneNumber, 
+        overdueTodo, 
+        userPreferences
+      );
+
+      return result;
+
+    } catch (error) {
+      console.error('Error sending overdue alert:', error);
+      return {
+        success: false,
+        error: error.message,
+        serviceUsed: 'none'
+      };
+    }
+  }
+
+  // Method to manually trigger a reminder (for testing)
+  async sendTestReminder(userId, todoId) {
+    try {
+      const todo = await Todo.findOne({
+        _id: todoId,
+        user: userId
+      }).populate('user');
+
+      if (!todo) {
+        throw new Error('Todo not found');
+      }
+
+      return await this.sendReminder(todo);
+    } catch (error) {
+      console.error('Error sending test reminder:', error);
+      throw error;
+    }
+  }
+
+  // Add this method for status checking
+  async getServiceStatus() {
+    return {
+      isRunning: false,
+      lastCheck: new Date(),
+      status: 'active'
+    };
   }
 }
 
-// Create and export singleton instance
-const reminderService = new ReminderService();
-module.exports = reminderService;
+module.exports = new ReminderService();

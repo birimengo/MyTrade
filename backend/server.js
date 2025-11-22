@@ -45,7 +45,6 @@ const certifiedOrdersRoutes = require('./routes/certifiedOrders');
 const certifiedStockRoutes = require('./routes/certifiedStock');
 const authControllerRoutes = require('./routes/authController');
 const todoRoutes = require('./routes/todo');
-const reminderService = require('./services/reminderService');
 
 // SAFE IMPORT FOR RETAILER ORDERS (prevents crash if file doesn't exist)
 let retailerOrderRoutes;
@@ -55,6 +54,21 @@ try {
 } catch (error) {
   console.log('Retailer orders route not available yet, using empty router');
   retailerOrderRoutes = express.Router();
+}
+
+// SAFE IMPORT FOR REMINDER SERVICE (prevents crash if service has issues)
+let reminderService;
+try {
+  reminderService = require('./services/reminderService');
+  console.log('✅ Reminder service loaded successfully');
+} catch (error) {
+  console.log('⚠️ Reminder service not available:', error.message);
+  // Create a mock reminder service to prevent crashes
+  reminderService = {
+    checkReminders: () => Promise.resolve({ success: false, message: 'Reminder service not available' }),
+    checkOverdueTodos: () => Promise.resolve({ success: false, message: 'Reminder service not available' }),
+    getServiceStatus: () => ({ status: 'disabled', error: 'Service not available' })
+  };
 }
 
 // Import socket handler
@@ -389,6 +403,7 @@ app.get('/api/health', async (req, res) => {
     
     let cloudinaryStatus = process.env.CLOUDINARY_URL ? 'configured' : 'not configured';
     let todoSystemStatus = 'available';
+    let reminderSystemStatus = 'available';
     
     // Check database connection
     if (mongoose.connection.readyState === 1) {
@@ -427,6 +442,14 @@ app.get('/api/health', async (req, res) => {
       }
     }
     
+    // Test reminder service
+    try {
+      const reminderStatus = reminderService.getServiceStatus ? reminderService.getServiceStatus() : { status: 'unknown' };
+      reminderSystemStatus = reminderStatus.status || 'available';
+    } catch (error) {
+      reminderSystemStatus = 'error: ' + error.message;
+    }
+    
     const responseTime = Date.now() - startTime;
     
     res.json({
@@ -446,6 +469,7 @@ app.get('/api/health', async (req, res) => {
       databaseTest: dbTest,
       cloudinary: cloudinaryStatus,
       todoSystem: todoSystemStatus,
+      reminderSystem: reminderSystemStatus,
       memory: {
         used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
         total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
@@ -463,7 +487,7 @@ app.get('/api/health', async (req, res) => {
         notifications: true,
         multiPlatform: true,
         todoManagement: true,
-        reminderSystem: true,
+        reminderSystem: reminderSystemStatus === 'available',
         whatsappNotifications: process.env.CALLMEBOT_API_KEY ? true : false
       },
       routes: [
@@ -993,27 +1017,60 @@ handleSocketConnection(io);
 function initializeReminderSystem() {
   console.log('🔄 Initializing reminder system...');
   
-  // Check reminders every 5 minutes
-  setInterval(() => {
-    reminderService.checkReminders();
-  }, 5 * 60 * 1000);
+  try {
+    // Check reminders every 5 minutes
+    setInterval(() => {
+      try {
+        reminderService.checkReminders().then(result => {
+          console.log('✅ Scheduled reminder check completed:', result);
+        }).catch(error => {
+          console.error('❌ Scheduled reminder check failed:', error);
+        });
+      } catch (error) {
+        console.error('❌ Error in scheduled reminder check:', error);
+      }
+    }, 5 * 60 * 1000);
 
-  // Check overdue todos every hour
-  setInterval(() => {
-    reminderService.checkOverdueTodos();
-  }, 60 * 60 * 1000);
+    // Check overdue todos every hour
+    setInterval(() => {
+      try {
+        reminderService.checkOverdueTodos().then(result => {
+          console.log('✅ Scheduled overdue check completed:', result);
+        }).catch(error => {
+          console.error('❌ Scheduled overdue check failed:', error);
+        });
+      } catch (error) {
+        console.error('❌ Error in overdue check:', error);
+      }
+    }, 60 * 60 * 1000);
 
-  // Initial check after 30 seconds (wait for DB connection)
-  setTimeout(() => {
-    console.log('🔄 Running initial reminder check...');
-    reminderService.checkReminders();
-    reminderService.checkOverdueTodos();
-  }, 30000);
+    // Initial check after 30 seconds (wait for DB connection)
+    setTimeout(() => {
+      console.log('🔄 Running initial reminder check...');
+      try {
+        reminderService.checkReminders().then(result => {
+          console.log('✅ Initial reminder check completed:', result);
+        }).catch(error => {
+          console.error('❌ Initial reminder check failed:', error);
+        });
+        
+        reminderService.checkOverdueTodos().then(result => {
+          console.log('✅ Initial overdue check completed:', result);
+        }).catch(error => {
+          console.error('❌ Initial overdue check failed:', error);
+        });
+      } catch (error) {
+        console.error('❌ Error in initial reminder check:', error);
+      }
+    }, 30000);
 
-  console.log('✅ Reminder system initialized');
-  console.log('   - Reminder checks: every 5 minutes');
-  console.log('   - Overdue checks: every hour');
-  console.log('   - WhatsApp integration:', process.env.CALLMEBOT_API_KEY ? 'Enabled' : 'Disabled');
+    console.log('✅ Reminder system initialized');
+    console.log('   - Reminder checks: every 5 minutes');
+    console.log('   - Overdue checks: every hour');
+    console.log('   - WhatsApp integration:', process.env.CALLMEBOT_API_KEY ? 'Enabled' : 'Disabled');
+  } catch (error) {
+    console.error('❌ Failed to initialize reminder system:', error);
+  }
 }
 
 // 404 handler

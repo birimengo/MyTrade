@@ -43,11 +43,7 @@ const wholesaleSalesRoutes = require('./routes/wholesaleSales');
 const customerRoutes = require('./routes/customers');
 const certifiedOrdersRoutes = require('./routes/certifiedOrders');
 const certifiedStockRoutes = require('./routes/certifiedStock');
-
-// Import password reset routes
 const authControllerRoutes = require('./routes/authController');
-
-// NEW: Import TODO and Reminder routes and services
 const todoRoutes = require('./routes/todo');
 const reminderService = require('./services/reminderService');
 

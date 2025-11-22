@@ -101,6 +101,15 @@ const todoSchema = new mongoose.Schema({
   nextRecurrence: {
     type: Date,
     required: false
+  },
+  // WhatsApp specific fields
+  whatsappReminderSent: {
+    type: Boolean,
+    default: false
+  },
+  whatsappReminderCount: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true
@@ -112,6 +121,7 @@ todoSchema.index({ user: 1, status: 1 });
 todoSchema.index({ user: 1, priority: 1 });
 todoSchema.index({ reminderDate: 1, reminderSent: 1 });
 todoSchema.index({ dueDate: 1, status: 1 });
+todoSchema.index({ reminderDate: 1, whatsappReminderSent: 1 });
 
 // Virtual for overdue status
 todoSchema.virtual('isOverdue').get(function() {
@@ -126,31 +136,102 @@ todoSchema.methods.shouldSendReminder = function() {
   if (!this.reminderDate || this.reminderSent || this.status === 'completed' || this.status === 'cancelled') {
     return false;
   }
-  return new Date() >= this.reminderDate;
+  
+  const now = new Date();
+  const reminderTime = new Date(this.reminderDate);
+  
+  // Send reminder if current time is past reminder time
+  return now >= reminderTime;
+};
+
+// Method to check if WhatsApp reminder should be sent
+todoSchema.methods.shouldSendWhatsAppReminder = function() {
+  if (!this.reminderDate || this.whatsappReminderSent || this.status === 'completed' || this.status === 'cancelled') {
+    return false;
+  }
+  
+  const now = new Date();
+  const reminderTime = new Date(this.reminderDate);
+  
+  // Send WhatsApp reminder if current time is past reminder time
+  return now >= reminderTime;
 };
 
 // Static method to get overdue todos
-todoSchema.statics.getOverdueTodos = function(userId) {
+todoSchema.statics.getOverdueTodos = function() {
   return this.find({
-    user: userId,
     dueDate: { $lt: new Date() },
-    status: { $in: ['pending', 'in-progress'] }
-  });
+    status: { $in: ['pending', 'in-progress'] },
+    reminderSent: false
+  }).populate('user');
 };
 
-// Static method to get upcoming reminders
-todoSchema.statics.getUpcomingReminders = function(minutes = 30) {
+// Static method to get todos that need reminders NOW
+todoSchema.statics.getPendingReminders = function() {
   const now = new Date();
-  const futureTime = new Date(now.getTime() + minutes * 60 * 1000);
   
   return this.find({
-    reminderDate: {
-      $lte: futureTime,
-      $gte: now
+    $or: [
+      {
+        // Reminders that are due now
+        reminderDate: { 
+          $lte: now,
+          $gte: new Date(now.getTime() - 5 * 60 * 1000) // Last 5 minutes
+        },
+        reminderSent: false,
+        status: { $in: ['pending', 'in-progress'] }
+      },
+      {
+        // WhatsApp reminders that are due now
+        reminderDate: { 
+          $lte: now,
+          $gte: new Date(now.getTime() - 5 * 60 * 1000) // Last 5 minutes
+        },
+        whatsappReminderSent: false,
+        status: { $in: ['pending', 'in-progress'] }
+      }
+    ]
+  }).populate('user');
+};
+
+// Static method to get todos for WhatsApp reminders
+todoSchema.statics.getWhatsAppReminders = function() {
+  const now = new Date();
+  
+  return this.find({
+    reminderDate: { 
+      $lte: now,
+      $gte: new Date(now.getTime() - 10 * 60 * 1000) // Last 10 minutes
     },
-    reminderSent: false,
+    whatsappReminderSent: false,
     status: { $in: ['pending', 'in-progress'] }
   }).populate('user');
 };
+
+// Method to mark reminder as sent
+todoSchema.methods.markReminderSent = function() {
+  this.reminderSent = true;
+  this.lastReminderSent = new Date();
+  return this.save();
+};
+
+// Method to mark WhatsApp reminder as sent
+todoSchema.methods.markWhatsAppReminderSent = function() {
+  this.whatsappReminderSent = true;
+  this.whatsappReminderCount += 1;
+  this.lastReminderSent = new Date();
+  return this.save();
+};
+
+// Pre-save middleware to handle reminder logic
+todoSchema.pre('save', function(next) {
+  // If reminder date is in the past and not sent, reset it to allow sending
+  if (this.reminderDate && new Date(this.reminderDate) < new Date() && !this.reminderSent) {
+    this.reminderSent = false;
+    this.whatsappReminderSent = false;
+  }
+  
+  next();
+});
 
 module.exports = mongoose.model('Todo', todoSchema);

@@ -166,6 +166,21 @@ todoSchema.statics.getOverdueTodos = function() {
   }).populate('user');
 };
 
+// ADD THIS MISSING METHOD - FIXES THE ERROR
+todoSchema.statics.getUpcomingReminders = function(minutes = 30) {
+  const now = new Date();
+  const futureTime = new Date(now.getTime() + minutes * 60 * 1000);
+  
+  return this.find({
+    reminderDate: {
+      $lte: futureTime,
+      $gte: now
+    },
+    reminderSent: false,
+    status: { $in: ['pending', 'in-progress'] }
+  }).populate('user');
+};
+
 // Static method to get todos that need reminders NOW
 todoSchema.statics.getPendingReminders = function() {
   const now = new Date();

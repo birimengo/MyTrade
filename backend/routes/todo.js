@@ -5,9 +5,78 @@ const Todo = require('../models/Todo');
 const User = require('../models/User');
 const router = express.Router();
 
+// Helper function for recurring tasks - calculate next recurrence
+function calculateNextRecurrence(dueDate, pattern) {
+  if (!dueDate) return null;
+  
+  const nextDate = new Date(dueDate);
+  
+  switch (pattern) {
+    case 'daily':
+      nextDate.setDate(nextDate.getDate() + 1);
+      break;
+    case 'weekly':
+      nextDate.setDate(nextDate.getDate() + 7);
+      break;
+    case 'monthly':
+      nextDate.setMonth(nextDate.getMonth() + 1);
+      break;
+    case 'yearly':
+      nextDate.setFullYear(nextDate.getFullYear() + 1);
+      break;
+    default:
+      return null;
+  }
+  
+  return nextDate;
+}
+
+// Helper function to create next recurrence
+async function createNextRecurrence(todo) {
+  try {
+    if (!todo.isRecurring || !todo.recurrencePattern) return;
+
+    const nextRecurrenceDate = calculateNextRecurrence(todo.dueDate, todo.recurrencePattern);
+    
+    if (!nextRecurrenceDate) return;
+
+    const nextTodoData = {
+      ...todo.toObject(),
+      _id: new mongoose.Types.ObjectId(),
+      title: todo.title,
+      status: 'pending',
+      dueDate: nextRecurrenceDate,
+      reminderDate: todo.reminderDate ? calculateNextRecurrence(todo.reminderDate, todo.recurrencePattern) : null,
+      completedAt: null,
+      reminderSent: false,
+      lastReminderSent: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    delete nextTodoData._id;
+    
+    const nextTodo = new Todo(nextTodoData);
+    await nextTodo.save();
+
+    // Update the original todo with next recurrence
+    await Todo.findByIdAndUpdate(todo._id, {
+      nextRecurrence: nextRecurrenceDate
+    });
+
+    return nextTodo;
+  } catch (error) {
+    console.error('❌ Error creating next recurrence:', error);
+    throw error;
+  }
+}
+
 // GET /api/todo - Get all todos with advanced filtering, search, and pagination
 router.get('/', auth, async (req, res) => {
   try {
+    console.log('🔍 GET /api/todo - Query params:', req.query);
+    console.log('🔍 GET /api/todo - User ID:', req.user.id);
+    
     const { 
       page = 1, 
       limit = 50, 
@@ -22,27 +91,34 @@ router.get('/', auth, async (req, res) => {
       dueDateTo
     } = req.query;
     
+    // Validate and sanitize inputs
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Cap at 100 for safety
+    
     // Build filter object
     const filter = { user: req.user.id };
     
     // Status filter
-    if (status && status !== 'all') {
+    if (status && status !== 'all' && ['pending', 'in-progress', 'completed', 'cancelled'].includes(status)) {
       filter.status = status;
     }
     
     // Priority filter
-    if (priority && priority !== 'all') {
+    if (priority && priority !== 'all' && ['low', 'medium', 'high', 'urgent'].includes(priority)) {
       filter.priority = priority;
     }
     
     // Category filter
     if (category && category !== 'all') {
-      filter.category = category;
+      const validCategories = ['general', 'sales', 'inventory', 'customer', 'financial', 'marketing', 'maintenance', 'personal', 'work', 'shopping', 'health'];
+      if (validCategories.includes(category)) {
+        filter.category = category;
+      }
     }
 
     // Search filter - search in title, description, category, and tags
     if (search && search.trim() !== '') {
-      const searchRegex = new RegExp(search.trim(), 'i');
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [
         { title: searchRegex },
         { description: searchRegex },
@@ -54,8 +130,14 @@ router.get('/', auth, async (req, res) => {
     // Date range filter
     if (dueDateFrom || dueDateTo) {
       filter.dueDate = {};
-      if (dueDateFrom) filter.dueDate.$gte = new Date(dueDateFrom);
-      if (dueDateTo) filter.dueDate.$lte = new Date(dueDateTo);
+      if (dueDateFrom) {
+        const fromDate = new Date(dueDateFrom);
+        if (!isNaN(fromDate)) filter.dueDate.$gte = fromDate;
+      }
+      if (dueDateTo) {
+        const toDate = new Date(dueDateTo);
+        if (!isNaN(toDate)) filter.dueDate.$lte = toDate;
+      }
     }
 
     // Overdue filter
@@ -68,18 +150,24 @@ router.get('/', auth, async (req, res) => {
     const sortConfig = {};
     const validSortFields = ['title', 'priority', 'status', 'category', 'dueDate', 'createdAt', 'updatedAt'];
     const validSortField = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
-    sortConfig[validSortField] = sortOrder === 'asc' ? 1 : -1;
+    const validSortOrder = sortOrder === 'asc' ? 1 : -1;
+    sortConfig[validSortField] = validSortOrder;
+
+    console.log('🔍 GET /api/todo - Final filter:', JSON.stringify(filter, null, 2));
+    console.log('🔍 GET /api/todo - Sort config:', sortConfig);
 
     // Execute query with pagination
     const todos = await Todo.find(filter)
       .sort(sortConfig)
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limitNum)
+      .skip((pageNum - 1) * limitNum)
       .populate('user', 'firstName lastName email phone')
       .populate('relatedSaleId', 'referenceNumber customerName grandTotal')
       .lean();
 
     const total = await Todo.countDocuments(filter);
+
+    console.log(`🔍 GET /api/todo - Found ${todos.length} todos out of ${total} total`);
 
     // Add virtual isOverdue field to each todo
     const todosWithOverdue = todos.map(todo => ({
@@ -94,9 +182,9 @@ router.get('/', auth, async (req, res) => {
       todos: todosWithOverdue,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / limit)
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
       },
       filters: {
         status,
@@ -112,7 +200,8 @@ router.get('/', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch todos',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -122,6 +211,9 @@ router.get('/overdue', auth, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+
     const overdueTodos = await Todo.find({
       user: req.user.id,
       dueDate: { $lt: new Date() },
@@ -130,8 +222,8 @@ router.get('/overdue', auth, async (req, res) => {
     .populate('user', 'firstName lastName email phone')
     .populate('relatedSaleId', 'referenceNumber customerName grandTotal')
     .sort({ dueDate: 1 })
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
+    .limit(limitNum)
+    .skip((pageNum - 1) * limitNum)
     .lean();
 
     const total = await Todo.countDocuments({
@@ -146,9 +238,9 @@ router.get('/overdue', auth, async (req, res) => {
       count: overdueTodos.length,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / limit)
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
       }
     });
   } catch (error) {
@@ -165,6 +257,9 @@ router.get('/overdue', auth, async (req, res) => {
 router.get('/upcoming', auth, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -183,8 +278,8 @@ router.get('/upcoming', auth, async (req, res) => {
     .populate('user', 'firstName lastName email phone')
     .populate('relatedSaleId', 'referenceNumber customerName grandTotal')
     .sort({ dueDate: 1 })
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
+    .limit(limitNum)
+    .skip((pageNum - 1) * limitNum)
     .lean();
 
     const total = await Todo.countDocuments({
@@ -206,9 +301,9 @@ router.get('/upcoming', auth, async (req, res) => {
       },
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / limit)
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
       }
     });
   } catch (error) {
@@ -1103,71 +1198,5 @@ router.get('/search/suggestions', auth, async (req, res) => {
     });
   }
 });
-
-// Helper function for recurring tasks - calculate next recurrence
-function calculateNextRecurrence(dueDate, pattern) {
-  if (!dueDate) return null;
-  
-  const nextDate = new Date(dueDate);
-  
-  switch (pattern) {
-    case 'daily':
-      nextDate.setDate(nextDate.getDate() + 1);
-      break;
-    case 'weekly':
-      nextDate.setDate(nextDate.getDate() + 7);
-      break;
-    case 'monthly':
-      nextDate.setMonth(nextDate.getMonth() + 1);
-      break;
-    case 'yearly':
-      nextDate.setFullYear(nextDate.getFullYear() + 1);
-      break;
-    default:
-      return null;
-  }
-  
-  return nextDate;
-}
-
-// Helper function to create next recurrence
-async function createNextRecurrence(todo) {
-  try {
-    if (!todo.isRecurring || !todo.recurrencePattern) return;
-
-    const nextRecurrenceDate = calculateNextRecurrence(todo.dueDate, todo.recurrencePattern);
-    
-    if (!nextRecurrenceDate) return;
-
-    const nextTodoData = {
-      ...todo.toObject(),
-      _id: new mongoose.Types.ObjectId(),
-      title: todo.title,
-      status: 'pending',
-      dueDate: nextRecurrenceDate,
-      reminderDate: todo.reminderDate ? calculateNextRecurrence(todo.reminderDate, todo.recurrencePattern) : null,
-      completedAt: null,
-      reminderSent: false,
-      lastReminderSent: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    delete nextTodoData._id;
-    
-    const nextTodo = new Todo(nextTodoData);
-    await nextTodo.save();
-
-    // Update the original todo with next recurrence
-    await Todo.findByIdAndUpdate(todo._id, {
-      nextRecurrence: nextRecurrenceDate
-    });
-
-    return nextTodo;
-  } catch (error) {
-    console.error('❌ Error creating next recurrence:', error);
-    throw error;
-  }
-}
 
 module.exports = router;

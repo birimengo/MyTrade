@@ -4,6 +4,1212 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { addSystemStockFromOrder } = require('./systemStockController');
 
+// ==================== ENHANCED STOCK MANAGEMENT FUNCTIONS ====================
+
+/**
+ * Enhanced stock management with comprehensive tracking and robust error handling
+ * FIXED VERSION with proper population, method calling, and persistence
+ */
+exports.updateProductStock = async (order) => {
+  try {
+    console.log(`🔄 Starting enhanced stock update for order certification:`, {
+      orderId: order._id,
+      productId: order.product,
+      quantity: order.quantity,
+      retailerId: order.retailer
+    });
+
+    // CRITICAL FIX: Properly populate product details before operations
+    let populatedOrder = order;
+    if (typeof order.populate === 'function' && (!order.product._id || typeof order.product._id === 'string')) {
+      populatedOrder = await order.populate('product');
+    }
+
+    const product = await Product.findById(populatedOrder.product._id || populatedOrder.product);
+    if (!product) {
+      console.error(`❌ Product not found: ${populatedOrder.product}`);
+      return {
+        success: false,
+        error: `Product not found: ${populatedOrder.product}`,
+        product: null,
+        stockUpdate: null
+      };
+    }
+
+    // Enhanced validation with comprehensive checks
+    if (typeof product.quantity !== 'number' || product.quantity < 0) {
+      console.warn(`⚠️ Invalid product quantity: ${product.quantity}, proceeding with certification`);
+      return {
+        success: false,
+        error: `Invalid product quantity: ${product.quantity}`,
+        product: product,
+        stockUpdate: null
+      };
+    }
+
+    console.log(`📦 Comprehensive stock analysis before update:`, {
+      productId: product._id,
+      productName: product.name,
+      currentStock: product.quantity,
+      orderQuantity: populatedOrder.quantity,
+      measurementUnit: product.measurementUnit,
+      lowStockAlert: product.lowStockAlert,
+      lowStockThreshold: product.lowStockThreshold
+    });
+
+    // CRITICAL FIX: Enhanced stock availability check with detailed information
+    if (product.quantity < populatedOrder.quantity) {
+      console.warn(`⚠️ Insufficient stock: Product ${product.name} has ${product.quantity} but order requires ${populatedOrder.quantity}`);
+      return {
+        success: false,
+        error: `Insufficient stock. Available: ${product.quantity}, Requested: ${populatedOrder.quantity}`,
+        product: product,
+        stockUpdate: null,
+        shortage: populatedOrder.quantity - product.quantity
+      };
+    }
+
+    // CRITICAL FIX: Enhanced stock reduction with proper method calling and persistence
+    let stockUpdate;
+    try {
+      if (typeof product.reduceStock === 'function') {
+        console.log(`📝 Using Product model's reduceStock method for: ${product.name}`);
+        
+        // CRITICAL FIX: Proper method calling with all required parameters
+        stockUpdate = await product.reduceStock(
+          populatedOrder.quantity,
+          populatedOrder.retailer?._id || populatedOrder.retailer,
+          'Order certified by retailer',
+          populatedOrder._id,
+          `Stock reduced for certified order ${populatedOrder._id}`
+        );
+        
+        console.log(`✅ Stock update result from reduceStock method:`, stockUpdate);
+      } else {
+        // Enhanced fallback: Direct stock reduction with comprehensive tracking
+        console.log('⚠️ reduceStock method not found, using enhanced direct stock update');
+        const previousQuantity = product.quantity;
+        product.quantity = Math.max(0, product.quantity - populatedOrder.quantity);
+        
+        // Enhanced stock history tracking
+        if (product.stockHistory && Array.isArray(product.stockHistory)) {
+          const stockHistoryEntry = {
+            previousQuantity: previousQuantity,
+            newQuantity: product.quantity,
+            changeAmount: -populatedOrder.quantity,
+            changeType: 'stock_out',
+            changedAt: new Date(),
+            changedBy: populatedOrder.retailer?._id || populatedOrder.retailer,
+            reason: 'Order certified by retailer',
+            orderReference: populatedOrder._id,
+            note: `Stock reduced for certified order ${populatedOrder._id}`,
+            metadata: {
+              orderType: 'retailer_order',
+              certificationDate: new Date(),
+              automatic: true
+            }
+          };
+          product.stockHistory.push(stockHistoryEntry);
+        }
+        
+        stockUpdate = {
+          previousQuantity: previousQuantity,
+          newQuantity: product.quantity,
+          reduction: populatedOrder.quantity,
+          stockHistoryId: null,
+          method: 'direct_update'
+        };
+      }
+
+      // CRITICAL FIX: Ensure product changes are persisted to database
+      console.log(`💾 Persisting stock changes to database for product: ${product.name}`);
+      await product.save({ validateBeforeSave: false });
+      console.log(`✅ Product stock successfully saved to database`);
+      
+      // Verify the save was successful
+      const verifiedProduct = await Product.findById(product._id);
+      console.log(`🔍 Stock verification - Current stock: ${verifiedProduct.quantity}`);
+      
+    } catch (methodError) {
+      console.error('❌ Error in stock reduction method:', methodError);
+      throw new Error(`Stock reduction failed: ${methodError.message}`);
+    }
+    
+    console.log(`🎉 Enhanced stock update completed successfully:`, {
+      product: product.name,
+      orderId: populatedOrder._id,
+      previousStock: stockUpdate.previousQuantity,
+      newStock: stockUpdate.newQuantity,
+      reduction: populatedOrder.quantity,
+      remainingStock: product.quantity,
+      lowStockAlert: product.quantity <= product.lowStockAlert
+    });
+    
+    return {
+      success: true,
+      product: {
+        _id: product._id,
+        name: product.name,
+        quantity: product.quantity,
+        measurementUnit: product.measurementUnit,
+        lowStockAlert: product.lowStockAlert
+      },
+      stockUpdate,
+      lowStockAlert: product.quantity <= product.lowStockAlert,
+      remainingStock: product.quantity,
+      metadata: {
+        updatedAt: new Date(),
+        method: stockUpdate.method || 'model_method'
+      }
+    };
+  } catch (error) {
+    console.error('❌ Comprehensive error updating product stock:', error);
+    
+    // Enhanced error information for debugging
+    return {
+      success: false,
+      error: error.message,
+      product: null,
+      stockUpdate: null,
+      orderId: order._id,
+      productId: order.product,
+      timestamp: new Date(),
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    };
+  }
+};
+
+/**
+ * Enhanced stock restoration with comprehensive tracking and robust error handling
+ * FIXED VERSION with proper population, method calling, and persistence
+ */
+exports.restoreProductStock = async (order) => {
+  try {
+    console.log(`🔄 Starting enhanced stock restoration for order return:`, {
+      orderId: order._id,
+      productId: order.product,
+      quantity: order.quantity,
+      wholesalerId: order.wholesaler
+    });
+
+    // CRITICAL FIX: Properly populate product details before operations
+    let populatedOrder = order;
+    if (typeof order.populate === 'function' && (!order.product._id || typeof order.product._id === 'string')) {
+      populatedOrder = await order.populate('product');
+    }
+
+    const product = await Product.findById(populatedOrder.product._id || populatedOrder.product);
+    if (!product) {
+      console.error(`❌ Product not found: ${populatedOrder.product}`);
+      return {
+        success: false,
+        error: `Product not found: ${populatedOrder.product}`,
+        product: null,
+        stockUpdate: null
+      };
+    }
+
+    console.log(`📦 Comprehensive stock analysis before restoration:`, {
+      productId: product._id,
+      productName: product.name,
+      currentStock: product.quantity,
+      restorationQuantity: populatedOrder.quantity,
+      measurementUnit: product.measurementUnit
+    });
+
+    // CRITICAL FIX: Enhanced stock restoration with proper method calling and persistence
+    let stockUpdate;
+    try {
+      if (typeof product.restoreStock === 'function') {
+        console.log(`📝 Using Product model's restoreStock method for: ${product.name}`);
+        
+        // CRITICAL FIX: Proper method calling with all required parameters
+        stockUpdate = await product.restoreStock(
+          populatedOrder.quantity,
+          populatedOrder.wholesaler?._id || populatedOrder.wholesaler,
+          'Order return accepted by wholesaler',
+          populatedOrder._id,
+          `Stock restored for returned order ${populatedOrder._id}`
+        );
+        
+        console.log(`✅ Stock restoration result from restoreStock method:`, stockUpdate);
+      } else {
+        // Enhanced fallback: Direct stock restoration with comprehensive tracking
+        console.log('⚠️ restoreStock method not found, using enhanced direct stock restoration');
+        const previousQuantity = product.quantity;
+        product.quantity = product.quantity + populatedOrder.quantity;
+        
+        // Enhanced stock history tracking
+        if (product.stockHistory && Array.isArray(product.stockHistory)) {
+          const stockHistoryEntry = {
+            previousQuantity: previousQuantity,
+            newQuantity: product.quantity,
+            changeAmount: populatedOrder.quantity,
+            changeType: 'stock_in',
+            changedAt: new Date(),
+            changedBy: populatedOrder.wholesaler?._id || populatedOrder.wholesaler,
+            reason: 'Order return accepted by wholesaler',
+            orderReference: populatedOrder._id,
+            note: `Stock restored for returned order ${populatedOrder._id}`,
+            metadata: {
+              orderType: 'retailer_order_return',
+              returnAcceptedDate: new Date(),
+              automatic: true
+            }
+          };
+          product.stockHistory.push(stockHistoryEntry);
+        }
+        
+        stockUpdate = {
+          previousQuantity: previousQuantity,
+          newQuantity: product.quantity,
+          restoration: populatedOrder.quantity,
+          stockHistoryId: null,
+          method: 'direct_update'
+        };
+      }
+
+      // CRITICAL FIX: Ensure product changes are persisted to database
+      console.log(`💾 Persisting stock restoration to database for product: ${product.name}`);
+      await product.save({ validateBeforeSave: false });
+      console.log(`✅ Product stock restoration successfully saved to database`);
+      
+      // Verify the save was successful
+      const verifiedProduct = await Product.findById(product._id);
+      console.log(`🔍 Stock restoration verification - Current stock: ${verifiedProduct.quantity}`);
+      
+    } catch (methodError) {
+      console.error('❌ Error in stock restoration method:', methodError);
+      throw new Error(`Stock restoration failed: ${methodError.message}`);
+    }
+    
+    console.log(`🎉 Enhanced stock restoration completed successfully:`, {
+      product: product.name,
+      orderId: populatedOrder._id,
+      previousStock: stockUpdate.previousQuantity,
+      newStock: stockUpdate.newQuantity,
+      restoration: populatedOrder.quantity,
+      currentStock: product.quantity
+    });
+    
+    return {
+      success: true,
+      product: {
+        _id: product._id,
+        name: product.name,
+        quantity: product.quantity,
+        measurementUnit: product.measurementUnit,
+        lowStockAlert: product.lowStockAlert
+      },
+      stockUpdate,
+      lowStockAlert: product.quantity <= product.lowStockAlert,
+      currentStock: product.quantity,
+      metadata: {
+        updatedAt: new Date(),
+        method: stockUpdate.method || 'model_method'
+      }
+    };
+  } catch (error) {
+    console.error('❌ Comprehensive error restoring product stock:', error);
+    
+    // Enhanced error information for debugging
+    return {
+      success: false,
+      error: error.message,
+      product: null,
+      stockUpdate: null,
+      orderId: order._id,
+      productId: order.product,
+      timestamp: new Date(),
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    };
+  }
+};
+
+// ==================== ENHANCED ORDER STATUS MANAGEMENT ====================
+
+/**
+ * Enhanced update order status with comprehensive stock management and graceful error handling
+ * FIXED VERSION with robust stock operations and detailed logging
+ */
+exports.updateOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      status, 
+      cancellationReason, 
+      transporterId, 
+      assignmentType, 
+      disputeReason, 
+      returnReason,
+      notes 
+    } = req.body;
+
+    console.log(`🔄 Enhanced order status update initiated:`, {
+      orderId: id,
+      newStatus: status,
+      userId: req.user.id,
+      userRole: req.user.role,
+      timestamp: new Date()
+    });
+
+    const order = await RetailerOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        orderId: id,
+        timestamp: new Date()
+      });
+    }
+
+    // Enhanced permission check with detailed information
+    if (!order.canUserPerformAction(req.user.id, req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this order',
+        requiredRole: order.getRequiredRoleForAction('update'),
+        userRole: req.user.role,
+        orderStatus: order.status,
+        timestamp: new Date()
+      });
+    }
+
+    // Enhanced status transition validation with comprehensive details
+    if (!order.isValidTransition(status, req.user.role)) {
+      const allowedTransitions = order.getAllowedTransitions(req.user.role);
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status transition from ${order.status} to ${status} for ${req.user.role}`,
+        currentStatus: order.status,
+        requestedStatus: status,
+        allowedTransitions: allowedTransitions,
+        userRole: req.user.role,
+        timestamp: new Date()
+      });
+    }
+
+    const previousStatus = order.status;
+    const updateMetadata = {
+      changedBy: req.user.id,
+      changedAt: new Date(),
+      previousStatus: previousStatus,
+      newStatus: status,
+      notes: notes,
+      userRole: req.user.role
+    };
+
+    console.log(`📋 Order status transition: ${previousStatus} → ${status}`);
+
+    // Handle delivery certification by retailer - ENHANCED STOCK UPDATE WITH GRACEFUL DEGRADATION
+    if (status === 'certified') {
+      console.log(`🏁 Processing enhanced order certification for: ${order._id}`);
+      
+      order.deliveryCertificationDate = new Date();
+      order.paymentStatus = 'paid';
+      
+      // CRITICAL FIX: Enhanced product stock quantity update with comprehensive error handling
+      try {
+        console.log(`📦 Starting enhanced stock update for certification of order: ${order._id}`);
+        
+        const stockUpdateResult = await this.updateProductStock(order);
+        
+        if (stockUpdateResult.success) {
+          console.log(`✅ Enhanced stock update successful for certified order:`, {
+            orderId: order._id,
+            productId: order.product,
+            productName: stockUpdateResult.product?.name,
+            quantityReduced: order.quantity,
+            previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
+            newStock: stockUpdateResult.stockUpdate?.newQuantity,
+            lowStockAlert: stockUpdateResult.lowStockAlert,
+            remainingStock: stockUpdateResult.remainingStock
+          });
+
+          // Enhanced stock update metadata for comprehensive tracking
+          order.metadata = order.metadata || {};
+          order.metadata.stockUpdate = {
+            previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
+            newStock: stockUpdateResult.stockUpdate?.newQuantity,
+            reducedBy: order.quantity,
+            updatedAt: new Date(),
+            lowStockAlertTriggered: stockUpdateResult.lowStockAlert,
+            success: true,
+            productName: stockUpdateResult.product?.name,
+            productId: stockUpdateResult.product?._id,
+            method: stockUpdateResult.metadata?.method,
+            remainingStock: stockUpdateResult.remainingStock
+          };
+        } else {
+          console.warn(`⚠️ Stock update failed but order certification proceeding with graceful degradation:`, {
+            error: stockUpdateResult.error,
+            orderId: order._id,
+            productId: order.product
+          });
+          
+          // CRITICAL FIX: Continue with certification even if stock update fails
+          order.metadata = order.metadata || {};
+          order.metadata.stockUpdate = {
+            success: false,
+            error: stockUpdateResult.error,
+            updatedAt: new Date(),
+            note: 'Order certified but stock update failed - manual adjustment required',
+            critical: false, // Mark as non-critical failure
+            requiresManualIntervention: true
+          };
+        }
+        
+      } catch (stockError) {
+        console.error('❌ Unexpected error during enhanced stock update process:', stockError);
+        
+        // CRITICAL FIX: Continue with order certification even if stock update fails completely
+        order.metadata = order.metadata || {};
+        order.metadata.stockUpdate = {
+          success: false,
+          error: stockError.message,
+          updatedAt: new Date(),
+          critical: false, // Mark as non-critical failure
+          requiresManualIntervention: true,
+          exception: true
+        };
+      }
+      
+      // Enhanced system stock addition with error handling
+      try {
+        await addSystemStockFromOrder(order);
+        console.log(`✅ Enhanced system stock updated for order: ${order._id}`);
+      } catch (systemStockError) {
+        console.error('⚠️ Enhanced system stock update failed:', systemStockError);
+        // Continue with order update - system stock is secondary
+      }
+
+      // Enhanced notification for certification with comprehensive data
+      const certificationNotification = await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Order Certified Successfully ✅',
+        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully.`,
+        data: {
+          orderId: order._id,
+          status: 'certified',
+          productName: order.product?.name,
+          quantity: order.quantity,
+          totalPrice: order.totalPrice,
+          stockUpdated: order.metadata?.stockUpdate?.success || false,
+          deliveryCertificationDate: order.deliveryCertificationDate,
+          paymentStatus: order.paymentStatus,
+          metadata: {
+            stockUpdateSuccess: order.metadata?.stockUpdate?.success,
+            requiresManualIntervention: order.metadata?.stockUpdate?.requiresManualIntervention,
+            lowStockAlert: order.metadata?.stockUpdate?.lowStockAlertTriggered
+          }
+        },
+        priority: 'medium',
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
+      });
+
+      // Enhanced real-time notification for certification
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'certified',
+          previousStatus: previousStatus,
+          notification: certificationNotification,
+          stockUpdated: order.metadata?.stockUpdate?.success || false,
+          requiresManualIntervention: order.metadata?.stockUpdate?.requiresManualIntervention,
+          timestamp: new Date()
+        });
+      }
+      
+      console.log(`🎉 Order ${order._id} certified successfully with enhanced stock update status: ${order.metadata?.stockUpdate?.success}`);
+    }
+
+    // Handle return acceptance by wholesaler - ENHANCED STOCK RESTORATION
+    if (status === 'return_accepted') {
+      console.log(`🔄 Processing enhanced stock restoration for return acceptance: ${order._id}`);
+      
+      order.returnDetails = order.returnDetails || {};
+      order.returnDetails.returnAcceptedAt = new Date();
+      order.returnDetails.returnCompletedAt = new Date();
+      order.paymentStatus = 'refunded';
+      
+      // Enhanced product stock restoration when return is accepted
+      try {
+        const stockRestoreResult = await this.restoreProductStock(order);
+        
+        if (stockRestoreResult.success) {
+          console.log(`✅ Enhanced stock restoration successful for returned order:`, {
+            orderId: order._id,
+            productId: order.product,
+            productName: stockRestoreResult.product?.name,
+            quantityRestored: order.quantity,
+            previousStock: stockRestoreResult.stockUpdate?.previousQuantity,
+            newStock: stockRestoreResult.stockUpdate?.newQuantity,
+            lowStockAlert: stockRestoreResult.lowStockAlert
+          });
+
+          // Enhanced stock restoration metadata
+          order.metadata = order.metadata || {};
+          order.metadata.stockRestoration = {
+            previousStock: stockRestoreResult.stockUpdate?.previousQuantity,
+            newStock: stockRestoreResult.stockUpdate?.newQuantity,
+            restoredBy: order.quantity,
+            updatedAt: new Date(),
+            lowStockAlertResolved: !stockRestoreResult.lowStockAlert,
+            success: true,
+            productName: stockRestoreResult.product?.name,
+            productId: stockRestoreResult.product?._id,
+            method: stockRestoreResult.metadata?.method,
+            currentStock: stockRestoreResult.currentStock
+          };
+        } else {
+          console.warn(`⚠️ Stock restoration failed but return accepted proceeding:`, stockRestoreResult.error);
+          order.metadata = order.metadata || {};
+          order.metadata.stockRestoration = {
+            success: false,
+            error: stockRestoreResult.error,
+            updatedAt: new Date(),
+            requiresManualIntervention: true
+          };
+        }
+        
+      } catch (stockError) {
+        console.error('❌ Enhanced error restoring product stock during return:', stockError);
+        // Continue with return processing even if stock update fails
+        order.metadata = order.metadata || {};
+        order.metadata.stockRestoration = {
+          success: false,
+          error: stockError.message,
+          updatedAt: new Date(),
+          requiresManualIntervention: true,
+          exception: true
+        };
+      }
+
+      // Enhanced return acceptance notification
+      const returnAcceptNotification = await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Accepted Successfully ✅',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
+        data: {
+          orderId: order._id,
+          status: 'return_accepted',
+          refundAmount: order.totalPrice,
+          stockRestored: order.metadata?.stockRestoration?.success || false,
+          returnCompletedAt: order.returnCompletedAt,
+          requiresManualIntervention: order.metadata?.stockRestoration?.requiresManualIntervention
+        },
+        priority: 'medium',
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
+      });
+
+      // Enhanced real-time notification for return acceptance
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'return_accepted',
+          refundAmount: order.totalPrice,
+          notification: returnAcceptNotification,
+          stockRestored: order.metadata?.stockRestoration?.success || false,
+          requiresManualIntervention: order.metadata?.stockRestoration?.requiresManualIntervention,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // Handle other status updates (existing functionality maintained)
+    if ((status === 'rejected_by_transporter' || status === 'cancelled_by_transporter') && cancellationReason) {
+      order.cancellationDetails = {
+        cancelledBy: req.user.id,
+        cancelledAt: new Date(),
+        reason: cancellationReason,
+        previousStatus: order.status,
+        userRole: req.user.role
+      };
+      
+      // Enhanced assignment history
+      if (order.transporter) {
+        order.addAssignmentHistory(
+          order.transporter,
+          order.assignmentHistory.length > 0 ? order.getLastAssignment().assignmentType : 'specific',
+          status === 'rejected_by_transporter' ? 'rejected' : 'cancelled',
+          cancellationReason,
+          new Date(Date.now() + 30 * 60 * 1000) // Expire in 30 minutes
+        );
+      }
+      
+      // Clear transporter for reassignment
+      order.transporter = null;
+    }
+
+    // Handle delivery dispute by retailer
+    if (status === 'disputed' && disputeReason) {
+      order.deliveryDispute = {
+        disputedBy: req.user.id,
+        disputedAt: new Date(),
+        reason: disputeReason,
+        resolved: false,
+        userRole: req.user.role
+      };
+
+      // Enhanced dispute notification
+      const disputeNotification = await Notification.create({
+        user: order.wholesaler,
+        type: 'order_disputed',
+        title: 'Order Disputed ⚠️',
+        message: `Order #${order._id.toString().slice(-8)} has been disputed by the retailer. Reason: ${disputeReason}`,
+        data: {
+          orderId: order._id,
+          status: 'disputed',
+          disputeReason: disputeReason,
+          retailerName: order.retailer?.businessName || `${order.retailer?.firstName} ${order.retailer?.lastName}`,
+          disputedAt: new Date(),
+          priority: 'high'
+        },
+        priority: 'high',
+        expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) // 2 days
+      });
+
+      // Enhanced real-time notification for dispute
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.wholesaler.toString()}`).emit('order_disputed', {
+          orderId: order._id,
+          disputeReason: disputeReason,
+          retailer: order.retailer,
+          notification: disputeNotification,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // Handle return to wholesaler by transporter
+    if (status === 'return_to_wholesaler' && returnReason) {
+      order.returnDetails = {
+        returnedBy: req.user.id,
+        returnRequestedAt: new Date(),
+        returnReason: returnReason,
+        userRole: req.user.role
+      };
+      order.returnRequestedAt = new Date();
+      order.returnReason = returnReason;
+
+      // Enhanced return notification
+      const returnNotification = await Notification.create({
+        user: order.wholesaler,
+        type: 'order_return',
+        title: 'Return Request 🔄',
+        message: `Transporter has requested to return order #${order._id.toString().slice(-8)}. Reason: ${returnReason}`,
+        data: {
+          orderId: order._id,
+          status: 'return_to_wholesaler',
+          returnReason: returnReason,
+          transporterName: order.transporter?.businessName || `${order.transporter?.firstName} ${order.transporter?.lastName}`,
+          returnRequestedAt: new Date()
+        },
+        priority: 'high',
+        expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) // 2 days
+      });
+
+      // Enhanced real-time notification for return request
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.wholesaler.toString()}`).emit('order_return', {
+          orderId: order._id,
+          returnReason: returnReason,
+          transporter: order.transporter,
+          notification: returnNotification,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // Handle return rejection by wholesaler
+    if (status === 'return_rejected') {
+      order.returnDetails.returnRejectedAt = new Date();
+      order.returnDetails.returnRejectionReason = returnReason;
+
+      // Enhanced return rejection notification
+      const returnRejectNotification = await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Rejected ❌',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been rejected. Reason: ${returnReason}`,
+        data: {
+          orderId: order._id,
+          status: 'return_rejected',
+          rejectionReason: returnReason,
+          returnRejectedAt: new Date()
+        },
+        priority: 'medium',
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
+      });
+
+      // Enhanced real-time notification for return rejection
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'return_rejected',
+          rejectionReason: returnReason,
+          notification: returnRejectNotification,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // Handle reassignment by wholesaler
+    if (status === 'assigned_to_transporter' && 
+        (order.status === 'rejected_by_transporter' || order.status === 'cancelled_by_transporter' || order.status === 'disputed' || order.status === 'return_rejected')) {
+      // Clear previous cancellation/dispute/return details for reassignment
+      order.cancellationDetails = undefined;
+      order.deliveryDispute = undefined;
+      order.returnDetails = undefined;
+      order.returnReason = undefined;
+      order.returnRequestedAt = undefined;
+    }
+
+    // Update order status
+    order.status = status;
+    order.metadata = order.metadata || {};
+    order.metadata.lastStatusUpdate = updateMetadata;
+    
+    // Enhanced transporter assignment
+    if ((transporterId && status === 'assigned_to_transporter') || 
+        (status === 'accepted_by_transporter' && req.user.role === 'transporter')) {
+      order.transporter = transporterId || req.user.id;
+      
+      // Enhanced assignment history for new assignments
+      if (status === 'assigned_to_transporter') {
+        order.addAssignmentHistory(
+          transporterId || null,
+          assignmentType || 'specific',
+          'assigned',
+          `Order assigned by ${req.user.role}`,
+          new Date(Date.now() + 24 * 60 * 60 * 1000) // Expire in 24 hours
+        );
+
+        // Enhanced assignment notification
+        if (transporterId) {
+          const assignmentNotification = await Notification.create({
+            user: transporterId,
+            type: 'order_assigned',
+            title: 'New Order Assigned 🚚',
+            message: `You have been assigned a new order for delivery. Order #${order._id.toString().slice(-8)}`,
+            data: {
+              orderId: order._id,
+              status: 'assigned_to_transporter',
+              productName: order.product?.name,
+              quantity: order.quantity,
+              deliveryPlace: order.deliveryPlace,
+              totalPrice: order.totalPrice,
+              assignmentType: assignmentType,
+              assignedAt: new Date()
+            },
+            priority: 'high',
+            expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) // 2 hours
+          });
+
+          // Enhanced real-time notification for order assignment
+          if (req.app.get('socketio')) {
+            const io = req.app.get('socketio');
+            io.to(`user_${transporterId.toString()}`).emit('order_assigned', {
+              orderId: order._id,
+              productName: order.product?.name,
+              quantity: order.quantity,
+              deliveryPlace: order.deliveryPlace,
+              totalPrice: order.totalPrice,
+              assignmentType: assignmentType,
+              notification: assignmentNotification,
+              timestamp: new Date()
+            });
+          }
+        }
+      }
+    }
+    
+    // Enhanced delivery tracking
+    if (status === 'delivered') {
+      order.actualDeliveryDate = new Date();
+
+      // Enhanced delivery notification
+      const deliveryNotification = await Notification.create({
+        user: order.retailer,
+        type: 'order_delivered',
+        title: 'Order Delivered 📦',
+        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been delivered. Please certify the delivery.`,
+        data: {
+          orderId: order._id,
+          status: 'delivered',
+          productName: order.product?.name,
+          quantity: order.quantity,
+          actualDeliveryDate: order.actualDeliveryDate,
+          transporter: order.transporter?.businessName || `${order.transporter?.firstName} ${order.transporter?.lastName}`
+        },
+        priority: 'medium',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+      });
+
+      // Enhanced real-time notification for delivery
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_delivered', {
+          orderId: order._id,
+          productName: order.product?.name,
+          quantity: order.quantity,
+          actualDeliveryDate: order.actualDeliveryDate,
+          notification: deliveryNotification,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // Enhanced status update notifications
+    if (['accepted', 'processing', 'in_transit'].includes(status)) {
+      let notificationMessage = '';
+      let notificationTitle = '';
+
+      switch (status) {
+        case 'accepted':
+          notificationTitle = 'Order Accepted ✅';
+          notificationMessage = `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been accepted by the wholesaler.`;
+          break;
+        case 'processing':
+          notificationTitle = 'Order Processing ⚙️';
+          notificationMessage = `Your order is now being processed by the wholesaler. Estimated delivery preparation time: 1-2 hours.`;
+          break;
+        case 'in_transit':
+          notificationTitle = 'Order In Transit 🚛';
+          notificationMessage = `Your order is now in transit and on its way to you. Estimated delivery time: 2-4 hours.`;
+          break;
+      }
+
+      if (notificationMessage) {
+        const statusNotification = await Notification.create({
+          user: order.retailer,
+          type: 'order_status_update',
+          title: notificationTitle,
+          message: notificationMessage,
+          data: {
+            orderId: order._id,
+            status: status,
+            productName: order.product?.name,
+            quantity: order.quantity,
+            estimatedDelivery: status === 'in_transit' ? new Date(Date.now() + 4 * 60 * 60 * 1000) : null
+          },
+          priority: 'medium',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+        });
+
+        // Enhanced real-time notification for status updates
+        if (req.app.get('socketio')) {
+          const io = req.app.get('socketio');
+          io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+            orderId: order._id,
+            status: status,
+            previousStatus: previousStatus,
+            productName: order.product?.name,
+            notification: statusNotification,
+            timestamp: new Date()
+          });
+        }
+      }
+    }
+
+    await order.save();
+
+    // Enhanced order population
+    await order.populate([
+      { 
+        path: 'product', 
+        select: 'name description images measurementUnit category sku price quantity lowStockAlert' 
+      },
+      { 
+        path: 'retailer', 
+        select: 'firstName lastName businessName phone email address' 
+      },
+      { 
+        path: 'transporter', 
+        select: 'firstName lastName businessName phone email vehicleType rating' 
+      },
+      { 
+        path: 'cancellationDetails.cancelledBy', 
+        select: 'firstName lastName businessName' 
+      },
+      { 
+        path: 'deliveryDispute.disputedBy', 
+        select: 'firstName lastName businessName' 
+      },
+      { 
+        path: 'returnDetails.returnedBy', 
+        select: 'firstName lastName businessName' 
+      },
+      { 
+        path: 'assignmentHistory.transporter', 
+        select: 'firstName lastName businessName phone vehicleType' 
+      }
+    ]);
+
+    // Enhanced response with comprehensive status update information
+    res.status(200).json({
+      success: true,
+      message: 'Order status updated successfully',
+      order,
+      statusUpdate: {
+        previousStatus,
+        newStatus: status,
+        changedBy: req.user.id,
+        changedAt: new Date(),
+        stockUpdated: status === 'certified' ? (order.metadata?.stockUpdate?.success || false) : false,
+        stockRestored: status === 'return_accepted' ? (order.metadata?.stockRestoration?.success || false) : false,
+        requiresManualIntervention: {
+          stockUpdate: order.metadata?.stockUpdate?.requiresManualIntervention || false,
+          stockRestoration: order.metadata?.stockRestoration?.requiresManualIntervention || false
+        }
+      },
+      metadata: {
+        notificationSent: true,
+        socketEmitted: !!req.app.get('socketio'),
+        timestamp: new Date(),
+        userRole: req.user.role
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Enhanced update order status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating order status',
+      error: error.message,
+      timestamp: new Date(),
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    });
+  }
+};
+
+// ==================== ENHANCED DEBUG AND VERIFICATION FUNCTIONS ====================
+
+/**
+ * Enhanced debug function to verify stock update with comprehensive analysis
+ */
+exports.debugStockUpdate = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const order = await RetailerOrder.findById(orderId)
+      .populate('product')
+      .populate('retailer', 'firstName lastName businessName')
+      .populate('wholesaler', 'firstName lastName businessName');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Enhanced product analysis
+    const product = await Product.findById(order.product);
+    
+    // Comprehensive method analysis
+    const hasReduceStockMethod = typeof product?.reduceStock === 'function';
+    const hasRestoreStockMethod = typeof product?.restoreStock === 'function';
+    
+    // Enhanced stock history analysis
+    const stockHistoryCount = product?.stockHistory?.length || 0;
+    const recentStockChanges = product?.stockHistory?.slice(-5) || [];
+
+    // Enhanced test stock update
+    let testResult = null;
+    if (product && hasReduceStockMethod) {
+      try {
+        // Create enhanced test order for verification
+        const testOrder = {
+          _id: order._id,
+          product: order.product,
+          quantity: 1, // Test with 1 unit
+          retailer: order.retailer._id,
+          wholesaler: order.wholesaler._id,
+          measurementUnit: order.measurementUnit,
+          populate: async function() { return this; } // Mock populate method
+        };
+        
+        testResult = await this.updateProductStock(testOrder);
+      } catch (testError) {
+        testResult = { 
+          error: testError.message,
+          stack: process.env.NODE_ENV === 'development' ? testError.stack : undefined
+        };
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      order: {
+        id: order._id,
+        status: order.status,
+        product: order.product?.name,
+        quantity: order.quantity,
+        retailer: order.retailer?.businessName,
+        wholesaler: order.wholesaler?.businessName,
+        totalPrice: order.totalPrice
+      },
+      product: product ? {
+        id: product._id,
+        name: product.name,
+        currentStock: product.quantity,
+        lowStockAlert: product.lowStockAlert,
+        lowStockThreshold: product.lowStockThreshold,
+        measurementUnit: product.measurementUnit,
+        hasReduceStockMethod,
+        hasRestoreStockMethod,
+        stockHistoryCount,
+        recentStockChanges: recentStockChanges.map(change => ({
+          changeType: change.changeType,
+          changeAmount: change.changeAmount,
+          previousQuantity: change.previousQuantity,
+          newQuantity: change.newQuantity,
+          reason: change.reason,
+          changedAt: change.changedAt
+        }))
+      } : null,
+      testResult,
+      systemInfo: {
+        serverTime: new Date(),
+        nodeVersion: process.version,
+        environment: process.env.NODE_ENV
+      }
+    });
+
+  } catch (error) {
+    console.error('Enhanced debug stock update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Enhanced debug failed',
+      error: error.message,
+      timestamp: new Date()
+    });
+  }
+};
+
+/**
+ * Enhanced function to manually fix stock for an order with comprehensive validation
+ */
+exports.manualStockFix = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { action, quantity, reason } = req.body; // 'reduce' or 'restore'
+    
+    const order = await RetailerOrder.findById(orderId)
+      .populate('product')
+      .populate('retailer', 'firstName lastName businessName')
+      .populate('wholesaler', 'firstName lastName businessName');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (!['reduce', 'restore'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be "reduce" or "restore"',
+        validActions: ['reduce', 'restore']
+      });
+    }
+
+    const fixQuantity = quantity || order.quantity;
+    const fixReason = reason || `Manual stock ${action} for order ${orderId}`;
+
+    console.log(`🔧 Manual stock fix requested:`, {
+      orderId,
+      action,
+      quantity: fixQuantity,
+      reason: fixReason,
+      performedBy: req.user.id
+    });
+
+    let result;
+    if (action === 'reduce') {
+      // Create a temporary order object for stock reduction
+      const tempOrder = {
+        ...order.toObject(),
+        quantity: fixQuantity,
+        populate: async function() { return this; }
+      };
+      result = await this.updateProductStock(tempOrder);
+    } else {
+      // Create a temporary order object for stock restoration
+      const tempOrder = {
+        ...order.toObject(),
+        quantity: fixQuantity,
+        populate: async function() { return this; }
+      };
+      result = await this.restoreProductStock(tempOrder);
+    }
+
+    // Enhanced order metadata update
+    order.metadata = order.metadata || {};
+    order.metadata.manualStockFix = {
+      action: action,
+      quantity: fixQuantity,
+      reason: fixReason,
+      performedBy: req.user.id,
+      performedAt: new Date(),
+      result: result.success ? 'success' : 'failed',
+      error: result.error,
+      previousStock: result.stockUpdate?.previousQuantity,
+      newStock: result.stockUpdate?.newQuantity
+    };
+    
+    await order.save();
+
+    // Enhanced audit logging
+    console.log(`✅ Manual stock fix completed:`, {
+      orderId,
+      action,
+      success: result.success,
+      previousStock: result.stockUpdate?.previousQuantity,
+      newStock: result.stockUpdate?.newQuantity
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Manual stock ${action} completed`,
+      action: action,
+      quantity: fixQuantity,
+      result: result,
+      order: {
+        id: order._id,
+        status: order.status,
+        product: order.product?.name,
+        quantity: order.quantity
+      },
+      fixDetails: {
+        performedBy: req.user.id,
+        performedAt: new Date(),
+        reason: fixReason
+      }
+    });
+
+  } catch (error) {
+    console.error('Enhanced manual stock fix error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Enhanced manual stock fix failed',
+      error: error.message,
+      timestamp: new Date()
+    });
+  }
+};
+
+// ==================== MAINTAINED EXISTING FUNCTIONS ====================
+
 // Create a new order with enhanced real-time notifications
 exports.createOrder = async (req, res) => {
   try {
@@ -767,771 +1973,7 @@ exports.getOrder = async (req, res) => {
   }
 };
 
-// ==================== FIXED STOCK MANAGEMENT FUNCTIONS ====================
-
-// Enhanced stock management with comprehensive tracking - FIXED VERSION
-exports.updateProductStock = async (order) => {
-  try {
-    console.log(`🔄 Starting stock update for order certification:`, {
-      orderId: order._id,
-      productId: order.product,
-      quantity: order.quantity
-    });
-
-    const product = await Product.findById(order.product);
-    if (!product) {
-      console.error(`❌ Product not found: ${order.product}`);
-      // Return success=false but don't throw error - allow certification to proceed
-      return {
-        success: false,
-        error: `Product not found: ${order.product}`,
-        product: null,
-        stockUpdate: null
-      };
-    }
-
-    // Enhanced validation with graceful handling
-    if (typeof product.quantity !== 'number' || product.quantity < 0) {
-      console.warn(`⚠️ Invalid product quantity: ${product.quantity}, proceeding with certification`);
-      return {
-        success: false,
-        error: `Invalid product quantity: ${product.quantity}`,
-        product: product,
-        stockUpdate: null
-      };
-    }
-
-    console.log(`📦 Stock before update:`, {
-      product: product.name,
-      currentStock: product.quantity,
-      orderQuantity: order.quantity
-    });
-
-    // Check if reduceStock method exists, if not use direct update
-    let stockUpdate;
-    if (typeof product.reduceStock === 'function') {
-      // Use the enhanced reduceStock method from Product model
-      stockUpdate = product.reduceStock(
-        order.quantity,
-        order.retailer, // Using retailer ID as the changer
-        'Order certified by retailer',
-        order._id,
-        `Stock reduced for certified order ${order._id}`
-      );
-    } else {
-      // Fallback: Direct stock reduction
-      console.log('⚠️ reduceStock method not found, using direct stock update');
-      const previousQuantity = product.quantity;
-      product.quantity = Math.max(0, product.quantity - order.quantity);
-      stockUpdate = {
-        previousQuantity: previousQuantity,
-        newQuantity: product.quantity,
-        reduction: order.quantity,
-        stockHistoryId: null
-      };
-    }
-
-    await product.save();
-    
-    console.log(`✅ Stock updated successfully:`, {
-      product: product.name,
-      orderId: order._id,
-      previousStock: stockUpdate.previousQuantity,
-      newStock: stockUpdate.newQuantity,
-      reduction: order.quantity
-    });
-    
-    return {
-      success: true,
-      product,
-      stockUpdate,
-      lowStockAlert: product.lowStockAlert,
-      remainingStock: product.quantity
-    };
-  } catch (error) {
-    console.error('❌ Error updating product stock:', error);
-    
-    // CRITICAL FIX: Don't throw error - return failure object instead
-    return {
-      success: false,
-      error: error.message,
-      product: null,
-      stockUpdate: null,
-      orderId: order._id,
-      productId: order.product
-    };
-  }
-};
-
-// Enhanced stock restoration with comprehensive tracking - FIXED VERSION
-exports.restoreProductStock = async (order) => {
-  try {
-    console.log(`🔄 Restoring stock for order return:`, {
-      orderId: order._id,
-      productId: order.product,
-      quantity: order.quantity
-    });
-
-    const product = await Product.findById(order.product);
-    if (!product) {
-      console.error(`❌ Product not found: ${order.product}`);
-      return {
-        success: false,
-        error: `Product not found: ${order.product}`,
-        product: null,
-        stockUpdate: null
-      };
-    }
-
-    // Check if restoreStock method exists, if not use direct update
-    let stockUpdate;
-    if (typeof product.restoreStock === 'function') {
-      // Use the enhanced restoreStock method from Product model
-      stockUpdate = product.restoreStock(
-        order.quantity,
-        order.wholesaler, // Using wholesaler ID as the changer
-        'Order return accepted by wholesaler',
-        order._id,
-        `Stock restored for returned order ${order._id}`
-      );
-    } else {
-      // Fallback: Direct stock restoration
-      console.log('⚠️ restoreStock method not found, using direct stock restoration');
-      const previousQuantity = product.quantity;
-      product.quantity = product.quantity + order.quantity;
-      stockUpdate = {
-        previousQuantity: previousQuantity,
-        newQuantity: product.quantity,
-        restoration: order.quantity,
-        stockHistoryId: null
-      };
-    }
-
-    await product.save();
-    
-    console.log(`✅ Stock restored successfully:`, {
-      product: product.name,
-      orderId: order._id,
-      previousStock: stockUpdate.previousQuantity,
-      newStock: stockUpdate.newQuantity,
-      restoration: order.quantity
-    });
-    
-    return {
-      success: true,
-      product,
-      stockUpdate,
-      lowStockAlert: product.lowStockAlert,
-      currentStock: product.quantity
-    };
-  } catch (error) {
-    console.error('❌ Error restoring product stock:', error);
-    
-    // CRITICAL FIX: Don't throw error - return failure object instead
-    return {
-      success: false,
-      error: error.message,
-      product: null,
-      stockUpdate: null,
-      orderId: order._id,
-      productId: order.product
-    };
-  }
-};
-
-// ==================== FIXED UPDATE ORDER STATUS FUNCTION ====================
-
-// Enhanced update order status with comprehensive stock management - FIXED VERSION
-exports.updateOrderStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { 
-      status, 
-      cancellationReason, 
-      transporterId, 
-      assignmentType, 
-      disputeReason, 
-      returnReason,
-      notes 
-    } = req.body;
-
-    const order = await RetailerOrder.findById(id);
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-
-    // Enhanced permission check
-    if (!order.canUserPerformAction(req.user.id, req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this order',
-        requiredRole: order.getRequiredRoleForAction('update'),
-        userRole: req.user.role
-      });
-    }
-
-    // Enhanced status transition validation
-    if (!order.isValidTransition(status, req.user.role)) {
-      const allowedTransitions = order.getAllowedTransitions(req.user.role);
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status transition from ${order.status} to ${status} for ${req.user.role}`,
-        currentStatus: order.status,
-        requestedStatus: status,
-        allowedTransitions: allowedTransitions,
-        userRole: req.user.role
-      });
-    }
-
-    const previousStatus = order.status;
-    const updateMetadata = {
-      changedBy: req.user.id,
-      changedAt: new Date(),
-      previousStatus: previousStatus,
-      newStatus: status,
-      notes: notes
-    };
-
-    // Handle cancellation/rejection by transporter
-    if ((status === 'rejected_by_transporter' || status === 'cancelled_by_transporter') && cancellationReason) {
-      order.cancellationDetails = {
-        cancelledBy: req.user.id,
-        cancelledAt: new Date(),
-        reason: cancellationReason,
-        previousStatus: order.status,
-        userRole: req.user.role
-      };
-      
-      // Enhanced assignment history
-      order.addAssignmentHistory(
-        order.transporter,
-        order.assignmentHistory.length > 0 ? order.getLastAssignment().assignmentType : 'specific',
-        status === 'rejected_by_transporter' ? 'rejected' : 'cancelled',
-        cancellationReason,
-        new Date(Date.now() + 30 * 60 * 1000) // Expire in 30 minutes
-      );
-      
-      // Clear transporter for reassignment
-      order.transporter = null;
-    }
-
-    // Handle delivery certification by retailer - FIXED STOCK UPDATE WITH GRACEFUL DEGRADATION
-    if (status === 'certified') {
-      order.deliveryCertificationDate = new Date();
-      order.paymentStatus = 'paid';
-      
-      // CRITICAL FIX: Enhanced product stock quantity update with graceful error handling
-      try {
-        const stockUpdateResult = await this.updateProductStock(order);
-        
-        if (stockUpdateResult.success) {
-          console.log(`📦 Stock updated for certified order:`, {
-            orderId: order._id,
-            productId: order.product,
-            quantityReduced: order.quantity,
-            stockUpdate: stockUpdateResult.stockUpdate,
-            lowStockAlert: stockUpdateResult.lowStockAlert
-          });
-
-          // Add stock update info to order metadata
-          order.metadata = order.metadata || {};
-          order.metadata.stockUpdate = {
-            previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
-            newStock: stockUpdateResult.stockUpdate?.newQuantity,
-            reducedBy: order.quantity,
-            updatedAt: new Date(),
-            lowStockAlertTriggered: stockUpdateResult.lowStockAlert,
-            success: true
-          };
-        } else {
-          console.warn(`⚠️ Stock update failed but order certification proceeding:`, stockUpdateResult.error);
-          
-          // CRITICAL FIX: Continue with certification even if stock update fails
-          order.metadata = order.metadata || {};
-          order.metadata.stockUpdate = {
-            success: false,
-            error: stockUpdateResult.error,
-            updatedAt: new Date(),
-            note: 'Order certified but stock update failed - manual adjustment required'
-          };
-        }
-        
-      } catch (stockError) {
-        console.error('❌ Unexpected error during stock update process:', stockError);
-        
-        // CRITICAL FIX: Continue with order certification even if stock update fails completely
-        order.metadata = order.metadata || {};
-        order.metadata.stockUpdate = {
-          success: false,
-          error: stockError.message,
-          updatedAt: new Date(),
-          critical: false // Mark as non-critical failure
-        };
-      }
-      
-      // Add system stock when order is certified (with error handling)
-      try {
-        await addSystemStockFromOrder(order);
-      } catch (systemStockError) {
-        console.error('⚠️ System stock update failed:', systemStockError);
-        // Continue with order update
-      }
-
-      // Enhanced notification for certification
-      const certificationNotification = await Notification.create({
-        user: order.retailer,
-        type: 'order_status_update',
-        title: 'Order Certified ✅',
-        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully.`,
-        data: {
-          orderId: order._id,
-          status: 'certified',
-          productName: order.product?.name,
-          quantity: order.quantity,
-          totalPrice: order.totalPrice,
-          stockUpdated: order.metadata?.stockUpdate?.success || false,
-          deliveryCertificationDate: order.deliveryCertificationDate
-        },
-        priority: 'medium',
-        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
-      });
-
-      // Enhanced real-time notification for certification
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
-          orderId: order._id,
-          status: 'certified',
-          previousStatus: previousStatus,
-          notification: certificationNotification,
-          stockUpdated: order.metadata?.stockUpdate?.success || false,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Handle delivery dispute by retailer
-    if (status === 'disputed' && disputeReason) {
-      order.deliveryDispute = {
-        disputedBy: req.user.id,
-        disputedAt: new Date(),
-        reason: disputeReason,
-        resolved: false,
-        userRole: req.user.role
-      };
-
-      // Enhanced dispute notification
-      const disputeNotification = await Notification.create({
-        user: order.wholesaler,
-        type: 'order_disputed',
-        title: 'Order Disputed ⚠️',
-        message: `Order #${order._id.toString().slice(-8)} has been disputed by the retailer. Reason: ${disputeReason}`,
-        data: {
-          orderId: order._id,
-          status: 'disputed',
-          disputeReason: disputeReason,
-          retailerName: order.retailer?.businessName || `${order.retailer?.firstName} ${order.retailer?.lastName}`,
-          disputedAt: new Date(),
-          priority: 'high'
-        },
-        priority: 'high',
-        expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) // 2 days
-      });
-
-      // Enhanced real-time notification for dispute
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.wholesaler.toString()}`).emit('order_disputed', {
-          orderId: order._id,
-          disputeReason: disputeReason,
-          retailer: order.retailer,
-          notification: disputeNotification,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Handle return to wholesaler by transporter
-    if (status === 'return_to_wholesaler' && returnReason) {
-      order.returnDetails = {
-        returnedBy: req.user.id,
-        returnRequestedAt: new Date(),
-        returnReason: returnReason,
-        userRole: req.user.role
-      };
-      order.returnRequestedAt = new Date();
-      order.returnReason = returnReason;
-
-      // Enhanced return notification
-      const returnNotification = await Notification.create({
-        user: order.wholesaler,
-        type: 'order_return',
-        title: 'Return Request 🔄',
-        message: `Transporter has requested to return order #${order._id.toString().slice(-8)}. Reason: ${returnReason}`,
-        data: {
-          orderId: order._id,
-          status: 'return_to_wholesaler',
-          returnReason: returnReason,
-          transporterName: order.transporter?.businessName || `${order.transporter?.firstName} ${order.transporter?.lastName}`,
-          returnRequestedAt: new Date()
-        },
-        priority: 'high',
-        expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) // 2 days
-      });
-
-      // Enhanced real-time notification for return request
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.wholesaler.toString()}`).emit('order_return', {
-          orderId: order._id,
-          returnReason: returnReason,
-          transporter: order.transporter,
-          notification: returnNotification,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Handle return acceptance by wholesaler - FIXED STOCK RESTORATION
-    if (status === 'return_accepted') {
-      order.returnDetails.returnAcceptedAt = new Date();
-      order.returnCompletedAt = new Date();
-      order.paymentStatus = 'refunded';
-      
-      // Enhanced product stock restoration when return is accepted
-      try {
-        const stockRestoreResult = await this.restoreProductStock(order);
-        
-        if (stockRestoreResult.success) {
-          console.log(`📦 Stock restored for returned order:`, {
-            orderId: order._id,
-            productId: order.product,
-            quantityRestored: order.quantity,
-            stockUpdate: stockRestoreResult.stockUpdate,
-            lowStockAlert: stockRestoreResult.lowStockAlert
-          });
-
-          // Add stock restoration info to order metadata
-          order.metadata = order.metadata || {};
-          order.metadata.stockRestoration = {
-            previousStock: stockRestoreResult.stockUpdate.previousQuantity,
-            newStock: stockRestoreResult.stockUpdate.newQuantity,
-            restoredBy: order.quantity,
-            updatedAt: new Date(),
-            lowStockAlertResolved: !stockRestoreResult.lowStockAlert,
-            success: true
-          };
-        } else {
-          console.warn(`⚠️ Stock restoration failed but return accepted:`, stockRestoreResult.error);
-          order.metadata = order.metadata || {};
-          order.metadata.stockRestoration = {
-            success: false,
-            error: stockRestoreResult.error,
-            updatedAt: new Date()
-          };
-        }
-        
-      } catch (stockError) {
-        console.error('❌ Error restoring product stock during return:', stockError);
-        // Continue with return processing even if stock update fails
-        order.metadata = order.metadata || {};
-        order.metadata.stockRestoration = {
-          success: false,
-          error: stockError.message,
-          updatedAt: new Date()
-        };
-      }
-
-      // Enhanced return acceptance notification
-      const returnAcceptNotification = await Notification.create({
-        user: order.retailer,
-        type: 'order_status_update',
-        title: 'Return Accepted ✅',
-        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
-        data: {
-          orderId: order._id,
-          status: 'return_accepted',
-          refundAmount: order.totalPrice,
-          stockRestored: order.metadata?.stockRestoration?.success || false,
-          returnCompletedAt: order.returnCompletedAt
-        },
-        priority: 'medium',
-        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
-      });
-
-      // Enhanced real-time notification for return acceptance
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
-          orderId: order._id,
-          status: 'return_accepted',
-          refundAmount: order.totalPrice,
-          notification: returnAcceptNotification,
-          stockRestored: order.metadata?.stockRestoration?.success || false,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Handle return rejection by wholesaler
-    if (status === 'return_rejected') {
-      order.returnDetails.returnRejectedAt = new Date();
-      order.returnDetails.returnRejectionReason = returnReason;
-
-      // Enhanced return rejection notification
-      const returnRejectNotification = await Notification.create({
-        user: order.retailer,
-        type: 'order_status_update',
-        title: 'Return Rejected ❌',
-        message: `Your return request for order #${order._id.toString().slice(-8)} has been rejected. Reason: ${returnReason}`,
-        data: {
-          orderId: order._id,
-          status: 'return_rejected',
-          rejectionReason: returnReason,
-          returnRejectedAt: new Date()
-        },
-        priority: 'medium',
-        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // 3 days
-      });
-
-      // Enhanced real-time notification for return rejection
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
-          orderId: order._id,
-          status: 'return_rejected',
-          rejectionReason: returnReason,
-          notification: returnRejectNotification,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Handle reassignment by wholesaler
-    if (status === 'assigned_to_transporter' && 
-        (order.status === 'rejected_by_transporter' || order.status === 'cancelled_by_transporter' || order.status === 'disputed' || order.status === 'return_rejected')) {
-      // Clear previous cancellation/dispute/return details for reassignment
-      order.cancellationDetails = undefined;
-      order.deliveryDispute = undefined;
-      order.returnDetails = undefined;
-      order.returnReason = undefined;
-      order.returnRequestedAt = undefined;
-    }
-
-    // Update order status
-    order.status = status;
-    order.metadata = order.metadata || {};
-    order.metadata.lastStatusUpdate = updateMetadata;
-    
-    // Enhanced transporter assignment
-    if ((transporterId && status === 'assigned_to_transporter') || 
-        (status === 'accepted_by_transporter' && req.user.role === 'transporter')) {
-      order.transporter = transporterId || req.user.id;
-      
-      // Enhanced assignment history for new assignments
-      if (status === 'assigned_to_transporter') {
-        order.addAssignmentHistory(
-          transporterId || null,
-          assignmentType || 'specific',
-          'assigned',
-          `Order assigned by ${req.user.role}`,
-          new Date(Date.now() + 24 * 60 * 60 * 1000) // Expire in 24 hours
-        );
-
-        // Enhanced assignment notification
-        if (transporterId) {
-          const assignmentNotification = await Notification.create({
-            user: transporterId,
-            type: 'order_assigned',
-            title: 'New Order Assigned 🚚',
-            message: `You have been assigned a new order for delivery. Order #${order._id.toString().slice(-8)}`,
-            data: {
-              orderId: order._id,
-              status: 'assigned_to_transporter',
-              productName: order.product?.name,
-              quantity: order.quantity,
-              deliveryPlace: order.deliveryPlace,
-              totalPrice: order.totalPrice,
-              assignmentType: assignmentType,
-              assignedAt: new Date()
-            },
-            priority: 'high',
-            expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) // 2 hours
-          });
-
-          // Enhanced real-time notification for order assignment
-          if (req.app.get('socketio')) {
-            const io = req.app.get('socketio');
-            io.to(`user_${transporterId.toString()}`).emit('order_assigned', {
-              orderId: order._id,
-              productName: order.product?.name,
-              quantity: order.quantity,
-              deliveryPlace: order.deliveryPlace,
-              totalPrice: order.totalPrice,
-              assignmentType: assignmentType,
-              notification: assignmentNotification,
-              timestamp: new Date()
-            });
-          }
-        }
-      }
-    }
-    
-    // Enhanced delivery tracking
-    if (status === 'delivered') {
-      order.actualDeliveryDate = new Date();
-
-      // Enhanced delivery notification
-      const deliveryNotification = await Notification.create({
-        user: order.retailer,
-        type: 'order_delivered',
-        title: 'Order Delivered 📦',
-        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been delivered. Please certify the delivery.`,
-        data: {
-          orderId: order._id,
-          status: 'delivered',
-          productName: order.product?.name,
-          quantity: order.quantity,
-          actualDeliveryDate: order.actualDeliveryDate,
-          transporter: order.transporter?.businessName || `${order.transporter?.firstName} ${order.transporter?.lastName}`
-        },
-        priority: 'medium',
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-      });
-
-      // Enhanced real-time notification for delivery
-      if (req.app.get('socketio')) {
-        const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_delivered', {
-          orderId: order._id,
-          productName: order.product?.name,
-          quantity: order.quantity,
-          actualDeliveryDate: order.actualDeliveryDate,
-          notification: deliveryNotification,
-          timestamp: new Date()
-        });
-      }
-    }
-
-    // Enhanced status update notifications
-    if (['accepted', 'processing', 'in_transit'].includes(status)) {
-      let notificationMessage = '';
-      let notificationTitle = '';
-
-      switch (status) {
-        case 'accepted':
-          notificationTitle = 'Order Accepted ✅';
-          notificationMessage = `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been accepted by the wholesaler.`;
-          break;
-        case 'processing':
-          notificationTitle = 'Order Processing ⚙️';
-          notificationMessage = `Your order is now being processed by the wholesaler. Estimated delivery preparation time: 1-2 hours.`;
-          break;
-        case 'in_transit':
-          notificationTitle = 'Order In Transit 🚛';
-          notificationMessage = `Your order is now in transit and on its way to you. Estimated delivery time: 2-4 hours.`;
-          break;
-      }
-
-      if (notificationMessage) {
-        const statusNotification = await Notification.create({
-          user: order.retailer,
-          type: 'order_status_update',
-          title: notificationTitle,
-          message: notificationMessage,
-          data: {
-            orderId: order._id,
-            status: status,
-            productName: order.product?.name,
-            quantity: order.quantity,
-            estimatedDelivery: status === 'in_transit' ? new Date(Date.now() + 4 * 60 * 60 * 1000) : null
-          },
-          priority: 'medium',
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-        });
-
-        // Enhanced real-time notification for status updates
-        if (req.app.get('socketio')) {
-          const io = req.app.get('socketio');
-          io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
-            orderId: order._id,
-            status: status,
-            previousStatus: previousStatus,
-            productName: order.product?.name,
-            notification: statusNotification,
-            timestamp: new Date()
-          });
-        }
-      }
-    }
-
-    await order.save();
-
-    // Enhanced order population
-    await order.populate([
-      { 
-        path: 'product', 
-        select: 'name description images measurementUnit category sku price quantity lowStockAlert' 
-      },
-      { 
-        path: 'retailer', 
-        select: 'firstName lastName businessName phone email address' 
-      },
-      { 
-        path: 'transporter', 
-        select: 'firstName lastName businessName phone email vehicleType rating' 
-      },
-      { 
-        path: 'cancellationDetails.cancelledBy', 
-        select: 'firstName lastName businessName' 
-      },
-      { 
-        path: 'deliveryDispute.disputedBy', 
-        select: 'firstName lastName businessName' 
-      },
-      { 
-        path: 'returnDetails.returnedBy', 
-        select: 'firstName lastName businessName' 
-      },
-      { 
-        path: 'assignmentHistory.transporter', 
-        select: 'firstName lastName businessName phone vehicleType' 
-      }
-    ]);
-
-    // Enhanced response with additional metadata
-    res.status(200).json({
-      success: true,
-      message: 'Order status updated successfully',
-      order,
-      statusUpdate: {
-        previousStatus,
-        newStatus: status,
-        changedBy: req.user.id,
-        changedAt: new Date(),
-        stockUpdated: status === 'certified' ? (order.metadata?.stockUpdate?.success || false) : false,
-        stockRestored: status === 'return_accepted' ? (order.metadata?.stockRestoration?.success || false) : false
-      },
-      metadata: {
-        notificationSent: true,
-        socketEmitted: !!req.app.get('socketio'),
-        timestamp: new Date()
-      }
-    });
-
-  } catch (error) {
-    console.error('Update order status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while updating order status',
-      error: error.message,
-      timestamp: new Date()
-    });
-  }
-};
+// ==================== MAINTAINED EXISTING HELPER FUNCTIONS ====================
 
 // Enhanced resolve delivery dispute with comprehensive resolution tracking
 exports.resolveDispute = async (req, res) => {

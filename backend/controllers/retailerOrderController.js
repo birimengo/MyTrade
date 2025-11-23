@@ -16,6 +16,13 @@ exports.createOrder = async (req, res) => {
       paymentMethod = 'cash_on_delivery'
     } = req.body;
 
+    console.log('🛒 Creating new order with data:', {
+      product,
+      quantity,
+      deliveryPlace,
+      retailer: req.user.id
+    });
+
     // Validate required fields
     if (!product || !quantity || !deliveryPlace || !deliveryCoordinates) {
       return res.status(400).json({
@@ -88,9 +95,15 @@ exports.createOrder = async (req, res) => {
 
     // Save the order
     await order.save();
+    console.log('✅ Order saved successfully:', order._id);
+
+    // Get retailer details for notification
+    const retailer = await User.findById(req.user.id);
+    const retailerName = retailer.businessName || `${retailer.firstName} ${retailer.lastName}`;
+
+    console.log('🔔 Creating notification for wholesaler:', productDetails.wholesaler._id);
 
     // Create notification for wholesaler about new order
-    const retailerName = req.user.businessName || `${req.user.firstName} ${req.user.lastName}`;
     const notification = new Notification({
       user: productDetails.wholesaler._id,
       type: 'new_order',
@@ -103,16 +116,20 @@ exports.createOrder = async (req, res) => {
         retailerName: retailerName,
         totalPrice: order.totalPrice,
         status: 'pending',
-        measurementUnit: productDetails.measurementUnit
+        measurementUnit: productDetails.measurementUnit,
+        deliveryPlace: deliveryPlace
       },
       priority: 'high'
     });
 
     await notification.save();
+    console.log('✅ Notification saved:', notification._id);
 
     // Emit real-time notification via Socket.io if available
     if (req.app.get('socketio')) {
       const io = req.app.get('socketio');
+      
+      console.log('📢 Emitting real-time notification to wholesaler:', productDetails.wholesaler._id);
       
       // Emit to wholesaler's personal room
       io.to(productDetails.wholesaler._id.toString()).emit('new_notification', {
@@ -136,14 +153,16 @@ exports.createOrder = async (req, res) => {
             images: productDetails.images
           },
           retailer: {
-            firstName: req.user.firstName,
-            lastName: req.user.lastName,
-            businessName: req.user.businessName
+            firstName: retailer.firstName,
+            lastName: retailer.lastName,
+            businessName: retailer.businessName
           },
           quantity: order.quantity,
           measurementUnit: order.measurementUnit,
           totalPrice: order.totalPrice,
-          status: order.status
+          status: order.status,
+          deliveryPlace: order.deliveryPlace,
+          createdAt: order.createdAt
         },
         notification: {
           _id: notification._id,
@@ -152,7 +171,9 @@ exports.createOrder = async (req, res) => {
         }
       });
 
-      console.log(`📢 Real-time notification sent to wholesaler: ${productDetails.wholesaler._id}`);
+      console.log('✅ Real-time notifications emitted successfully');
+    } else {
+      console.log('⚠️ Socket.IO not available for real-time notifications');
     }
 
     // Populate the order with necessary details
@@ -173,7 +194,7 @@ exports.createOrder = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Create order error:', error);
+    console.error('❌ Create order error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while creating order',
@@ -1039,6 +1060,62 @@ exports.getPendingOrdersCount = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while fetching pending orders count',
+      error: error.message
+    });
+  }
+};
+
+// Debug endpoint to check notification status for an order
+exports.debugOrderNotification = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await RetailerOrder.findById(orderId)
+      .populate('retailer', 'firstName lastName businessName')
+      .populate('wholesaler', 'firstName lastName businessName')
+      .populate('product', 'name');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Check if notification exists
+    const notification = await Notification.findOne({
+      'data.orderId': orderId
+    });
+
+    res.json({
+      success: true,
+      order: {
+        id: order._id,
+        status: order.status,
+        retailer: order.retailer,
+        wholesaler: order.wholesaler,
+        product: order.product,
+        quantity: order.quantity,
+        totalPrice: order.totalPrice,
+        createdAt: order.createdAt
+      },
+      notification: notification ? {
+        id: notification._id,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        read: notification.read,
+        createdAt: notification.createdAt
+      } : null,
+      notificationExists: !!notification,
+      socketAvailable: !!req.app.get('socketio')
+    });
+
+  } catch (error) {
+    console.error('Debug order notification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Debug failed',
       error: error.message
     });
   }

@@ -4,7 +4,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { addSystemStockFromOrder } = require('./systemStockController');
 
-// Create a new order
+// Create a new order with enhanced real-time notifications
 exports.createOrder = async (req, res) => {
   try {
     const {
@@ -107,7 +107,7 @@ exports.createOrder = async (req, res) => {
     const notification = new Notification({
       user: productDetails.wholesaler._id,
       type: 'new_order',
-      title: 'New Order Received',
+      title: 'New Order Received! 🛒',
       message: `You have received a new order for ${quantity} ${productDetails.measurementUnit} of ${productDetails.name} from ${retailerName}`,
       data: {
         orderId: order._id,
@@ -125,14 +125,14 @@ exports.createOrder = async (req, res) => {
     await notification.save();
     console.log('✅ Notification saved:', notification._id);
 
-    // Emit real-time notification via Socket.io if available
+    // NEW: Enhanced real-time notification system
     if (req.app.get('socketio')) {
       const io = req.app.get('socketio');
       
-      console.log('📢 Emitting real-time notification to wholesaler:', productDetails.wholesaler._id);
+      console.log('📢 Emitting enhanced real-time notifications to wholesaler:', productDetails.wholesaler._id);
       
       // Emit to wholesaler's personal room
-      io.to(productDetails.wholesaler._id.toString()).emit('new_notification', {
+      io.to(`user_${productDetails.wholesaler._id.toString()}`).emit('new_notification', {
         notification: {
           _id: notification._id,
           type: notification.type,
@@ -140,12 +140,13 @@ exports.createOrder = async (req, res) => {
           message: notification.message,
           data: notification.data,
           read: notification.read,
-          createdAt: notification.createdAt
+          createdAt: notification.createdAt,
+          priority: notification.priority
         }
       });
       
-      // Emit specific new_order event
-      io.to(productDetails.wholesaler._id.toString()).emit('new_order', {
+      // Emit specific new_order event for immediate order processing
+      io.to(`user_${productDetails.wholesaler._id.toString()}`).emit('new_order', {
         order: {
           _id: order._id,
           product: {
@@ -167,11 +168,32 @@ exports.createOrder = async (req, res) => {
         notification: {
           _id: notification._id,
           title: notification.title,
-          message: notification.message
+          message: notification.message,
+          type: notification.type
         }
       });
 
-      console.log('✅ Real-time notifications emitted successfully');
+      // NEW: Emit global order creation event for any interested listeners
+      io.emit('new_order_created', {
+        _id: order._id,
+        productName: productDetails.name,
+        quantity: order.quantity,
+        measurementUnit: order.measurementUnit,
+        totalPrice: order.totalPrice,
+        deliveryPlace: order.deliveryPlace,
+        wholesalerId: productDetails.wholesaler._id,
+        retailerId: req.user.id,
+        product: {
+          name: productDetails.name
+        },
+        retailer: {
+          firstName: retailer.firstName,
+          lastName: retailer.lastName,
+          businessName: retailer.businessName
+        }
+      });
+
+      console.log('✅ Enhanced real-time notifications emitted successfully');
     } else {
       console.log('⚠️ Socket.IO not available for real-time notifications');
     }
@@ -473,7 +495,7 @@ exports.restoreProductStock = async (order) => {
   }
 };
 
-// Update order status
+// Update order status with enhanced real-time notifications
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -550,10 +572,10 @@ exports.updateOrderStatus = async (req, res) => {
       }
 
       // Create notification for retailer about order certification
-      await Notification.create({
+      const certificationNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
-        title: 'Order Certified',
+        title: 'Order Certified ✅',
         message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully.`,
         data: {
           orderId: order._id,
@@ -563,6 +585,16 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'medium'
       });
+
+      // NEW: Emit real-time notification for certification
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'certified',
+          notification: certificationNotification
+        });
+      }
     }
 
     // Handle delivery dispute by retailer
@@ -575,10 +607,10 @@ exports.updateOrderStatus = async (req, res) => {
       };
 
       // Create notification for wholesaler about dispute
-      await Notification.create({
+      const disputeNotification = await Notification.create({
         user: order.wholesaler,
         type: 'order_disputed',
-        title: 'Order Disputed',
+        title: 'Order Disputed ⚠️',
         message: `Order #${order._id.toString().slice(-8)} has been disputed by the retailer. Reason: ${disputeReason}`,
         data: {
           orderId: order._id,
@@ -588,6 +620,16 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'high'
       });
+
+      // NEW: Emit real-time notification for dispute
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.wholesaler.toString()}`).emit('order_disputed', {
+          orderId: order._id,
+          disputeReason: disputeReason,
+          notification: disputeNotification
+        });
+      }
     }
 
     // Handle return to wholesaler by transporter
@@ -601,10 +643,10 @@ exports.updateOrderStatus = async (req, res) => {
       order.returnReason = returnReason;
 
       // Create notification for wholesaler about return request
-      await Notification.create({
+      const returnNotification = await Notification.create({
         user: order.wholesaler,
         type: 'order_return',
-        title: 'Return Request',
+        title: 'Return Request 🔄',
         message: `Transporter has requested to return order #${order._id.toString().slice(-8)}. Reason: ${returnReason}`,
         data: {
           orderId: order._id,
@@ -614,6 +656,16 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'high'
       });
+
+      // NEW: Emit real-time notification for return request
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.wholesaler.toString()}`).emit('order_return', {
+          orderId: order._id,
+          returnReason: returnReason,
+          notification: returnNotification
+        });
+      }
     }
 
     // Handle return acceptance by wholesaler - RESTORE STOCK HERE
@@ -631,10 +683,10 @@ exports.updateOrderStatus = async (req, res) => {
       }
 
       // Create notification for retailer about return acceptance
-      await Notification.create({
+      const returnAcceptNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
-        title: 'Return Accepted',
+        title: 'Return Accepted ✅',
         message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
         data: {
           orderId: order._id,
@@ -643,6 +695,16 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'medium'
       });
+
+      // NEW: Emit real-time notification for return acceptance
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'return_accepted',
+          notification: returnAcceptNotification
+        });
+      }
     }
 
     // Handle return rejection by wholesaler
@@ -650,10 +712,10 @@ exports.updateOrderStatus = async (req, res) => {
       order.returnDetails.returnRejectedAt = new Date();
 
       // Create notification for retailer about return rejection
-      await Notification.create({
+      const returnRejectNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
-        title: 'Return Rejected',
+        title: 'Return Rejected ❌',
         message: `Your return request for order #${order._id.toString().slice(-8)} has been rejected.`,
         data: {
           orderId: order._id,
@@ -661,6 +723,16 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'medium'
       });
+
+      // NEW: Emit real-time notification for return rejection
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          orderId: order._id,
+          status: 'return_rejected',
+          notification: returnRejectNotification
+        });
+      }
     }
 
     // Handle reassignment by wholesaler
@@ -692,10 +764,10 @@ exports.updateOrderStatus = async (req, res) => {
 
         // Create notification for assigned transporter
         if (transporterId) {
-          await Notification.create({
+          const assignmentNotification = await Notification.create({
             user: transporterId,
             type: 'order_assigned',
-            title: 'New Order Assigned',
+            title: 'New Order Assigned 🚚',
             message: `You have been assigned a new order for delivery. Order #${order._id.toString().slice(-8)}`,
             data: {
               orderId: order._id,
@@ -706,6 +778,18 @@ exports.updateOrderStatus = async (req, res) => {
             },
             priority: 'high'
           });
+
+          // NEW: Emit real-time notification for order assignment
+          if (req.app.get('socketio')) {
+            const io = req.app.get('socketio');
+            io.to(`user_${transporterId.toString()}`).emit('order_assigned', {
+              orderId: order._id,
+              productName: order.product?.name,
+              quantity: order.quantity,
+              deliveryPlace: order.deliveryPlace,
+              notification: assignmentNotification
+            });
+          }
         }
       }
     }
@@ -715,10 +799,10 @@ exports.updateOrderStatus = async (req, res) => {
       order.actualDeliveryDate = new Date();
 
       // Create notification for retailer about delivery
-      await Notification.create({
+      const deliveryNotification = await Notification.create({
         user: order.retailer,
         type: 'order_delivered',
-        title: 'Order Delivered',
+        title: 'Order Delivered 📦',
         message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been delivered. Please certify the delivery.`,
         data: {
           orderId: order._id,
@@ -728,30 +812,41 @@ exports.updateOrderStatus = async (req, res) => {
         },
         priority: 'medium'
       });
+
+      // NEW: Emit real-time notification for delivery
+      if (req.app.get('socketio')) {
+        const io = req.app.get('socketio');
+        io.to(`user_${order.retailer.toString()}`).emit('order_delivered', {
+          orderId: order._id,
+          productName: order.product?.name,
+          quantity: order.quantity,
+          notification: deliveryNotification
+        });
+      }
     }
 
-    // Create general status update notifications
+    // Create general status update notifications with real-time emissions
     if (['accepted', 'processing', 'in_transit'].includes(status)) {
       let notificationMessage = '';
       let notificationTitle = '';
 
       switch (status) {
         case 'accepted':
-          notificationTitle = 'Order Accepted';
+          notificationTitle = 'Order Accepted ✅';
           notificationMessage = `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been accepted by the wholesaler.`;
           break;
         case 'processing':
-          notificationTitle = 'Order Processing';
+          notificationTitle = 'Order Processing ⚙️';
           notificationMessage = `Your order is now being processed by the wholesaler.`;
           break;
         case 'in_transit':
-          notificationTitle = 'Order In Transit';
+          notificationTitle = 'Order In Transit 🚛';
           notificationMessage = `Your order is now in transit and on its way to you.`;
           break;
       }
 
       if (notificationMessage) {
-        await Notification.create({
+        const statusNotification = await Notification.create({
           user: order.retailer,
           type: 'order_status_update',
           title: notificationTitle,
@@ -763,6 +858,17 @@ exports.updateOrderStatus = async (req, res) => {
           },
           priority: 'medium'
         });
+
+        // NEW: Emit real-time notification for status updates
+        if (req.app.get('socketio')) {
+          const io = req.app.get('socketio');
+          io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+            orderId: order._id,
+            status: status,
+            productName: order.product?.name,
+            notification: statusNotification
+          });
+        }
       }
     }
 
@@ -794,7 +900,7 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
-// Resolve delivery dispute (for wholesaler)
+// Resolve delivery dispute (for wholesaler) with real-time notifications
 exports.resolveDispute = async (req, res) => {
   try {
     const { id } = req.params;
@@ -838,10 +944,10 @@ exports.resolveDispute = async (req, res) => {
     await order.save();
 
     // Create notification for retailer about dispute resolution
-    await Notification.create({
+    const disputeResolutionNotification = await Notification.create({
       user: order.retailer,
       type: 'order_status_update',
-      title: 'Dispute Resolved',
+      title: 'Dispute Resolved ✅',
       message: `The dispute for order #${order._id.toString().slice(-8)} has been resolved. ${resolutionNotes}`,
       data: {
         orderId: order._id,
@@ -850,6 +956,17 @@ exports.resolveDispute = async (req, res) => {
       },
       priority: 'medium'
     });
+
+    // NEW: Emit real-time notification for dispute resolution
+    if (req.app.get('socketio')) {
+      const io = req.app.get('socketio');
+      io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+        orderId: order._id,
+        status: reassign ? 'assigned_to_transporter' : 'disputed_resolved',
+        resolutionNotes: resolutionNotes,
+        notification: disputeResolutionNotification
+      });
+    }
 
     await order.populate([
       { path: 'product', select: 'name description images' },
@@ -874,7 +991,7 @@ exports.resolveDispute = async (req, res) => {
   }
 };
 
-// Handle return request (for wholesaler)
+// Handle return request (for wholesaler) with real-time notifications
 exports.handleReturnRequest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -923,6 +1040,48 @@ exports.handleReturnRequest = async (req, res) => {
     }
 
     await order.save();
+
+    // Create appropriate notification based on action
+    let notification;
+    if (action === 'accept') {
+      notification = await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Accepted ✅',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
+        data: {
+          orderId: order._id,
+          status: 'return_accepted',
+          refundAmount: order.totalPrice
+        },
+        priority: 'medium'
+      });
+    } else {
+      notification = await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Rejected ❌',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been rejected. Reason: ${rejectionReason}`,
+        data: {
+          orderId: order._id,
+          status: 'return_rejected',
+          rejectionReason: rejectionReason
+        },
+        priority: 'medium'
+      });
+    }
+
+    // NEW: Emit real-time notification for return handling
+    if (req.app.get('socketio')) {
+      const io = req.app.get('socketio');
+      io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+        orderId: order._id,
+        status: action === 'accept' ? 'return_accepted' : 'return_rejected',
+        refundAmount: action === 'accept' ? order.totalPrice : null,
+        rejectionReason: action === 'reject' ? rejectionReason : null,
+        notification: notification
+      });
+    }
 
     await order.populate([
       { path: 'product', select: 'name description images' },
@@ -1116,6 +1275,135 @@ exports.debugOrderNotification = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Debug failed',
+      error: error.message
+    });
+  }
+};
+
+// NEW: Test notification endpoint for real-time testing
+exports.testOrderNotification = async (req, res) => {
+  try {
+    const { wholesalerId, productName, quantity, measurementUnit } = req.body;
+
+    const targetWholesalerId = wholesalerId || req.user.id;
+
+    console.log('🧪 Testing order notification for wholesaler:', targetWholesalerId);
+
+    // Create a test notification
+    const testNotification = await Notification.create({
+      user: targetWholesalerId,
+      type: 'new_order',
+      title: 'Test Order Notification 🧪',
+      message: `Test order for ${quantity || 5} ${measurementUnit || 'kg'} of ${productName || 'Test Product'}`,
+      data: {
+        orderId: 'test_' + Date.now(),
+        productName: productName || 'Test Product',
+        quantity: quantity || 5,
+        retailerName: 'Test Retailer',
+        totalPrice: 25000,
+        status: 'pending',
+        measurementUnit: measurementUnit || 'kg',
+        deliveryPlace: 'Test Location'
+      },
+      priority: 'high'
+    });
+
+    // Emit real-time test notification
+    if (req.app.get('socketio')) {
+      const io = req.app.get('socketio');
+      
+      io.to(`user_${targetWholesalerId.toString()}`).emit('new_notification', {
+        notification: {
+          _id: testNotification._id,
+          type: testNotification.type,
+          title: testNotification.title,
+          message: testNotification.message,
+          data: testNotification.data,
+          read: testNotification.read,
+          createdAt: testNotification.createdAt,
+          priority: testNotification.priority
+        }
+      });
+
+      io.to(`user_${targetWholesalerId.toString()}`).emit('new_order', {
+        order: {
+          _id: 'test_' + Date.now(),
+          product: {
+            name: productName || 'Test Product',
+            images: []
+          },
+          retailer: {
+            firstName: 'Test',
+            lastName: 'Retailer',
+            businessName: 'Test Business'
+          },
+          quantity: quantity || 5,
+          measurementUnit: measurementUnit || 'kg',
+          totalPrice: 25000,
+          status: 'pending',
+          deliveryPlace: 'Test Location',
+          createdAt: new Date()
+        },
+        notification: {
+          _id: testNotification._id,
+          title: testNotification.title,
+          message: testNotification.message,
+          type: testNotification.type
+        }
+      });
+
+      console.log('✅ Test notifications emitted successfully');
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Test notification sent successfully',
+      notification: testNotification,
+      socketAvailable: !!req.app.get('socketio')
+    });
+
+  } catch (error) {
+    console.error('Test order notification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test notification failed',
+      error: error.message
+    });
+  }
+};
+
+// NEW: Get real-time notification status for user
+exports.getNotificationStatus = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get unread notifications count
+    const unreadCount = await Notification.countDocuments({
+      user: userId,
+      read: false
+    });
+
+    // Get recent notifications
+    const recentNotifications = await Notification.find({
+      user: userId
+    })
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .select('type title message read createdAt data');
+
+    res.status(200).json({
+      success: true,
+      unreadCount,
+      recentNotifications,
+      socketAvailable: !!req.app.get('socketio'),
+      userRoom: `user_${userId}`
+    });
+
+  } catch (error) {
+    console.error('Get notification status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get notification status',
       error: error.message
     });
   }

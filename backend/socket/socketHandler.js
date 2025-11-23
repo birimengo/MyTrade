@@ -1,7 +1,8 @@
-// backend/socket/socketHandler.js - Enhanced version
+// backend/socket/socketHandler.js - EXPANDED WITH NOTIFICATIONS
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 
 const handleSocketConnection = (io) => {
   const onlineUsers = new Map(); // userId -> socketId
@@ -31,6 +32,71 @@ const handleSocketConnection = (io) => {
       console.log(`👤 User ${userId} is now ${isOnline ? 'online' : 'offline'}`);
     } catch (error) {
       console.error('Error updating user status:', error);
+    }
+  };
+
+  // NEW: Enhanced notification system
+  const sendNotificationToUser = async (userId, notificationData) => {
+    try {
+      const notification = await Notification.create(notificationData);
+      const populatedNotification = await Notification.findById(notification._id)
+        .populate('user', 'firstName lastName businessName avatarUrl');
+
+      // Emit to user's personal room
+      io.to(`user_${userId}`).emit('new_notification', {
+        notification: populatedNotification
+      });
+
+      // Also emit to all user's sockets
+      io.to(userId.toString()).emit('notification_received', {
+        notification: populatedNotification
+      });
+
+      console.log(`🔔 Notification sent to user ${userId}: ${notificationData.title}`);
+      
+      return populatedNotification;
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      throw error;
+    }
+  };
+
+  // NEW: Handle order notifications
+  const handleOrderNotification = async (orderData) => {
+    try {
+      const { wholesalerId, retailerId, ...order } = orderData;
+      
+      const retailer = await User.findById(retailerId).select('firstName lastName businessName');
+      const retailerName = retailer?.businessName || `${retailer?.firstName} ${retailer?.lastName}` || 'a retailer';
+      
+      const notification = await sendNotificationToUser(wholesalerId, {
+        user: wholesalerId,
+        type: 'new_order',
+        title: 'New Order Received! 🛒',
+        message: `New order for ${order.quantity} ${order.measurementUnit} of ${order.productName} from ${retailerName}`,
+        data: {
+          orderId: order._id,
+          productName: order.productName,
+          quantity: order.quantity,
+          retailerName: retailerName,
+          totalPrice: order.totalPrice,
+          measurementUnit: order.measurementUnit,
+          deliveryPlace: order.deliveryPlace,
+          status: 'pending'
+        },
+        priority: 'high'
+      });
+
+      // Emit specific new_order event
+      io.to(`user_${wholesalerId}`).emit('new_order', {
+        order: orderData,
+        notification: notification
+      });
+
+      console.log(`✅ Order notification processed for wholesaler: ${wholesalerId}`);
+
+    } catch (error) {
+      console.error('❌ Order notification error:', error);
     }
   };
 
@@ -74,6 +140,7 @@ const handleSocketConnection = (io) => {
         
         // Join user room and conversation rooms
         socket.join(userId);
+        socket.join(`user_${userId}`); // NEW: Join personal notification room
         
         // Join user's conversations
         const conversations = await Conversation.find({ participants: userId });
@@ -95,6 +162,163 @@ const handleSocketConnection = (io) => {
       } catch (error) {
         console.error('Authentication error:', error);
         socket.emit('authentication_failed', { message: error.message });
+      }
+    });
+
+    // NEW: Join user's personal notification room
+    socket.on('join_user_room', (userId) => {
+      if (userId && socket.userId === userId) {
+        socket.join(`user_${userId}`);
+        console.log(`🔔 User ${userId} joined their notification room`);
+        socket.emit('user_room_joined', { userId });
+      }
+    });
+
+    // NEW: Order creation event from backend
+    socket.on('new_order_created', async (orderData) => {
+      try {
+        console.log('🛒 Processing new order creation:', orderData._id);
+        await handleOrderNotification(orderData);
+      } catch (error) {
+        console.error('❌ Error processing new order:', error);
+        socket.emit('notification_error', { error: error.message });
+      }
+    });
+
+    // NEW: Test notification endpoint
+    socket.on('test_notification', async (data) => {
+      try {
+        const userId = data.userId || socket.userId;
+        if (!userId) {
+          socket.emit('error', { message: 'User ID required for test notification' });
+          return;
+        }
+
+        const testOrderData = {
+          _id: 'test_order_' + Date.now(),
+          productName: data.productName || 'Test Product',
+          quantity: data.quantity || 5,
+          measurementUnit: data.measurementUnit || 'kg',
+          totalPrice: data.totalPrice || 25000,
+          deliveryPlace: data.deliveryPlace || 'Test Location',
+          wholesalerId: userId,
+          retailerId: userId,
+          product: {
+            name: data.productName || 'Test Product'
+          },
+          retailer: {
+            firstName: 'Test',
+            lastName: 'Retailer',
+            businessName: 'Test Business'
+          }
+        };
+
+        await handleOrderNotification(testOrderData);
+        socket.emit('test_notification_sent', { success: true, userId });
+        
+      } catch (error) {
+        console.error('❌ Test notification error:', error);
+        socket.emit('test_notification_error', { error: error.message });
+      }
+    });
+
+    // NEW: Mark notification as read
+    socket.on('mark_notification_read', async (data, callback) => {
+      try {
+        const { notificationId } = data;
+        const notification = await Notification.findOneAndUpdate(
+          { _id: notificationId, user: socket.userId },
+          { 
+            read: true, 
+            readAt: new Date() 
+          },
+          { new: true }
+        );
+
+        if (notification) {
+          socket.emit('notification_marked_read', { 
+            notificationId,
+            notification 
+          });
+          
+          if (callback) {
+            callback({ success: true, notification });
+          }
+          
+          console.log(`✅ Notification ${notificationId} marked as read by user ${socket.userId}`);
+        } else {
+          const error = 'Notification not found or access denied';
+          if (callback) {
+            callback({ success: false, error });
+          }
+          socket.emit('notification_error', { error });
+        }
+      } catch (error) {
+        console.error('Error marking notification as read:', error);
+        if (callback) {
+          callback({ success: false, error: error.message });
+        }
+        socket.emit('notification_error', { error: error.message });
+      }
+    });
+
+    // NEW: Mark all notifications as read
+    socket.on('mark_all_notifications_read', async (data, callback) => {
+      try {
+        const result = await Notification.updateMany(
+          { 
+            user: socket.userId,
+            read: false 
+          },
+          { 
+            read: true,
+            readAt: new Date()
+          }
+        );
+
+        socket.emit('all_notifications_marked_read', {
+          userId: socket.userId,
+          modifiedCount: result.modifiedCount
+        });
+
+        if (callback) {
+          callback({ 
+            success: true, 
+            modifiedCount: result.modifiedCount 
+          });
+        }
+
+        console.log(`✅ ${result.modifiedCount} notifications marked as read for user ${socket.userId}`);
+      } catch (error) {
+        console.error('Error marking all notifications as read:', error);
+        if (callback) {
+          callback({ success: false, error: error.message });
+        }
+        socket.emit('notification_error', { error: error.message });
+      }
+    });
+
+    // NEW: Get unread notifications count
+    socket.on('get_unread_count', async (data, callback) => {
+      try {
+        const count = await Notification.countDocuments({
+          user: socket.userId,
+          read: false
+        });
+
+        if (callback) {
+          callback({ success: true, count });
+        }
+        
+        socket.emit('unread_count_updated', {
+          userId: socket.userId,
+          count
+        });
+      } catch (error) {
+        console.error('Error getting unread count:', error);
+        if (callback) {
+          callback({ success: false, error: error.message });
+        }
       }
     });
 
@@ -141,9 +365,8 @@ const handleSocketConnection = (io) => {
           fileSize: data.fileSize || 0,
           fileType: data.fileType || '',
           cloudinaryPublicId: data.cloudinaryPublicId || '',
-          // Add React Native specific fields
-          localUri: data.localUri || '', // For React Native file references
-          thumbnailUrl: data.thumbnailUrl || '' // For image/video previews
+          localUri: data.localUri || '',
+          thumbnailUrl: data.thumbnailUrl || ''
         };
 
         const message = await Message.create(messageData);
@@ -345,10 +568,20 @@ const handleSocketConnection = (io) => {
     });
   });
 
+  // NEW: Global event handler for backend routes to emit notifications
+  io.on('order_created', async (orderData) => {
+    try {
+      console.log('🛒 Processing order from backend route:', orderData._id);
+      await handleOrderNotification(orderData);
+    } catch (error) {
+      console.error('❌ Error processing backend order:', error);
+    }
+  });
+
   // Periodically clean up stale connections
   setInterval(() => {
     console.log(`🔄 Connection stats: ${onlineUsers.size} online users, ${userSockets.size} users with sockets`);
-  }, 30000); // Log every 30 seconds
+  }, 30000);
 };
 
 module.exports = { handleSocketConnection };

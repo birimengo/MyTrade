@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FaChartBar, FaSync, FaBox, FaUsers, FaShoppingCart } from 'react-icons/fa';
-import { CreateSales, Sales, Receipts, Analytics } from './BMSTabs';
+import { CreateSales, Sales, TODO, Analytics } from './BMSTabs';
 import { useAuth } from '../../context/AuthContext';
 
 const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => {
   const [activeSection, setActiveSection] = useState('create-sales');
   const [wholesaleSales, setWholesaleSales] = useState([]);
-  const [receipts, setReceipts] = useState([]);
+  const [todo, setTodo] = useState([]);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,6 +18,7 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
   const productsRef = useRef(products);
   const customersRef = useRef(customers);
   const wholesaleSalesRef = useRef(wholesaleSales);
+  const todoRef = useRef(todo);
 
   // Update refs when state changes
   useEffect(() => {
@@ -31,6 +32,10 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
   useEffect(() => {
     wholesaleSalesRef.current = wholesaleSales;
   }, [wholesaleSales]);
+
+  useEffect(() => {
+    todoRef.current = todo;
+  }, [todo]);
 
   // Business metrics state
   const [businessMetrics, setBusinessMetrics] = useState({
@@ -159,7 +164,7 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
 
       // Build URL with parameters to get ALL products
       const url = new URL(`${API_BASE_URL}/api/products`);
-      url.searchParams.append('limit', '1000'); // Large number to get all products
+      url.searchParams.append('limit', '10000'); // Very large number to get all products
       url.searchParams.append('page', '1');
       url.searchParams.append('includeCertified', 'true');
 
@@ -174,12 +179,7 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         const data = await response.json();
         if (data.success) {
           const productsData = data.products || [];
-          console.log(`✅ Loaded ${productsData.length} total products`, {
-            certified: productsData.filter(p => p.fromCertifiedOrder).length,
-            manual: productsData.filter(p => !p.fromCertifiedOrder).length,
-            available: productsData.filter(p => p.quantity > 0).length,
-            outOfStock: productsData.filter(p => p.quantity <= 0).length
-          });
+          console.log(`✅ Loaded ${productsData.length} total products`);
           
           const productsWithCostPrice = productsData.map(product => ({
             ...product,
@@ -202,81 +202,129 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
     }
   }, [API_BASE_URL, getAuthToken]);
 
-  // Fetch customers from database
+  // Fetch ALL customers from database
   const fetchCustomers = useCallback(async () => {
     try {
-      console.log('🔄 Fetching customers (retailers)...');
+      console.log('🔄 Fetching ALL customers...');
       const token = getAuthToken();
       if (!token) {
         throw new Error('No authentication token found');
       }
       
-      const endpoints = [
-        `${API_BASE_URL}/api/customers`,
-        `${API_BASE_URL}/api/retailers/all`,
-        `${API_BASE_URL}/api/retailers`,
-        `${API_BASE_URL}/api/users/retailers`
-      ];
+      // Build URL to get ALL customers without pagination
+      const url = new URL(`${API_BASE_URL}/api/customers`);
+      url.searchParams.append('limit', '10000');
+      url.searchParams.append('page', '1');
       
-      let retailersData = [];
-      let successfulEndpoint = '';
-      
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`Trying endpoint: ${endpoint}`);
-          const response = await fetch(endpoint, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            console.log('📦 Raw API response:', data);
-            
-            if (data.customers) {
-              retailersData = data.customers;
-            } else if (data.retailers) {
-              retailersData = data.retailers;
-            } else if (data.users) {
-              retailersData = data.users;
-            } else if (Array.isArray(data)) {
-              retailersData = data;
-            } else {
-              retailersData = [];
-            }
-            
-            successfulEndpoint = endpoint;
-            console.log(`✅ Found ${retailersData.length} retailers at ${endpoint}`);
-            break;
-          }
-        } catch (error) {
-          console.log(`❌ Endpoint ${endpoint} failed:`, error.message);
-          continue;
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        let retailersData = [];
+        
+        if (data.customers) {
+          retailersData = data.customers;
+        } else if (data.retailers) {
+          retailersData = data.retailers;
+        } else if (data.users) {
+          retailersData = data.users;
+        } else if (Array.isArray(data)) {
+          retailersData = data;
+        } else if (data.data && Array.isArray(data.data)) {
+          retailersData = data.data;
+        } else {
+          retailersData = [];
+        }
+        
+        const formattedCustomers = retailersData.map(retailer => ({
+          _id: retailer._id || retailer.id,
+          id: retailer._id || retailer.id,
+          name: retailer.businessName || `${retailer.firstName || ''} ${retailer.lastName || ''}`.trim() || 'Unknown Retailer',
+          email: retailer.email || '',
+          phone: retailer.phone || '',
+          address: retailer.address || '',
+          businessName: retailer.businessName || '',
+          type: 'retailer',
+          createdAt: retailer.createdAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ Loaded ${formattedCustomers.length} customers`);
+        setCustomers(formattedCustomers);
+        
+        return { 
+          status: 'success', 
+          count: formattedCustomers.length
+        };
+      } else {
+        // Fallback to multiple endpoints if main endpoint fails
+        const endpoints = [
+          `${API_BASE_URL}/api/retailers/all?limit=10000`,
+          `${API_BASE_URL}/api/retailers?limit=10000`,
+          `${API_BASE_URL}/api/users/retailers?limit=10000`
+        ];
+        
+        let retailersData = [];
+        
+        for (const endpoint of endpoints) {
+          try {
+            const fallbackResponse = await fetch(endpoint, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (fallbackResponse.ok) {
+              const fallbackData = await fallbackResponse.json();
+              
+              if (fallbackData.customers) {
+                retailersData = fallbackData.customers;
+              } else if (fallbackData.retailers) {
+                retailersData = fallbackData.retailers;
+              } else if (fallbackData.users) {
+                retailersData = fallbackData.users;
+              } else if (Array.isArray(fallbackData)) {
+                retailersData = fallbackData;
+              } else if (fallbackData.data && Array.isArray(fallbackData.data)) {
+                retailersData = fallbackData.data;
+              }
+              
+              if (retailersData.length > 0) {
+                console.log(`✅ Loaded ${retailersData.length} customers from fallback endpoint`);
+                break;
+              }
+            }
+          } catch (error) {
+            console.log(`❌ Fallback endpoint failed: ${endpoint}`, error.message);
+            continue;
+          }
+        }
+        
+        const formattedCustomers = retailersData.map(retailer => ({
+          _id: retailer._id || retailer.id,
+          id: retailer._id || retailer.id,
+          name: retailer.businessName || `${retailer.firstName || ''} ${retailer.lastName || ''}`.trim() || 'Unknown Retailer',
+          email: retailer.email || '',
+          phone: retailer.phone || '',
+          address: retailer.address || '',
+          businessName: retailer.businessName || '',
+          type: 'retailer',
+          createdAt: retailer.createdAt || new Date().toISOString()
+        }));
+        
+        console.log(`✅ Loaded ${formattedCustomers.length} customers from fallback endpoints`);
+        setCustomers(formattedCustomers);
+        
+        return { 
+          status: retailersData.length > 0 ? 'success' : 'error', 
+          count: formattedCustomers.length
+        };
       }
-      
-      const formattedCustomers = retailersData.map(retailer => ({
-        _id: retailer._id || retailer.id,
-        id: retailer._id || retailer.id,
-        name: retailer.businessName || `${retailer.firstName || ''} ${retailer.lastName || ''}`.trim() || 'Unknown Retailer',
-        email: retailer.email || '',
-        phone: retailer.phone || '',
-        address: retailer.address || '',
-        businessName: retailer.businessName || '',
-        type: 'retailer',
-        createdAt: retailer.createdAt || new Date().toISOString()
-      }));
-      
-      console.log(`✅ Loaded ${formattedCustomers.length} customers from ${successfulEndpoint || 'multiple endpoints'}`);
-      setCustomers(formattedCustomers);
-      
-      return { 
-        status: successfulEndpoint ? 'success' : 'error', 
-        count: formattedCustomers.length,
-        endpoint: successfulEndpoint
-      };
       
     } catch (error) {
       console.error('❌ Error fetching customers:', error);
@@ -285,27 +333,29 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
     }
   }, [API_BASE_URL, getAuthToken]);
 
-  // Fetch wholesale sales data
+  // Fetch ALL wholesale sales data without pagination
   const fetchWholesaleSales = useCallback(async () => {
     try {
-      console.log('🔄 Fetching wholesale sales...');
+      console.log('🔄 Fetching ALL wholesale sales...');
       const token = getAuthToken();
       if (!token) {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/wholesale-sales`, {
+      // Build URL to get ALL sales without pagination
+      const url = new URL(`${API_BASE_URL}/api/wholesale-sales`);
+      url.searchParams.append('limit', '10000'); // Very large number to get all sales
+      url.searchParams.append('page', '1');
+
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
       
-      console.log(`📊 Wholesale sales response status: ${response.status}`);
-      
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 Wholesale sales API response:', data);
         
         if (data.success) {
           const salesWithCustomerDetails = data.wholesaleSales.map(sale => ({
@@ -368,7 +418,7 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
   // SINGLE loadBusinessData function that handles everything
   const loadBusinessData = useCallback(async () => {
     setLoading(true);
-    console.log('🔄 Loading business data...');
+    console.log('🔄 Loading ALL business data...');
     
     try {
       const token = getAuthToken();
@@ -376,43 +426,29 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         throw new Error('No authentication token found. Please log in again.');
       }
 
-      console.log('✅ Auth initialized, fetching data...');
-
       const [productsResult, customersResult, salesResult] = await Promise.allSettled([
         fetchProducts(),
         fetchCustomers(),
         fetchWholesaleSales()
       ]);
 
-      const operations = ['Products', 'Customers', 'Wholesale Sales'];
-      const resultsSummary = {};
-      
-      [productsResult, customersResult, salesResult].forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          const operationResult = result.value;
-          resultsSummary[operations[index].toLowerCase().replace(' ', '_')] = operationResult.status;
-          if (operationResult.status === 'success') {
-            console.log(`✅ ${operations[index]} loaded successfully: ${operationResult.count} items`);
-          } else {
-            console.error(`❌ ${operations[index]} failed:`, operationResult.error);
-          }
-        } else {
-          resultsSummary[operations[index].toLowerCase().replace(' ', '_')] = 'failed';
-          console.error(`❌ ${operations[index]} failed:`, result.reason);
-        }
+      // Log results summary
+      const results = {
+        products: productsResult.status === 'fulfilled' ? productsResult.value : { status: 'failed' },
+        customers: customersResult.status === 'fulfilled' ? customersResult.value : { status: 'failed' },
+        sales: salesResult.status === 'fulfilled' ? salesResult.value : { status: 'failed' }
+      };
+
+      console.log('📊 All data loaded:', {
+        products: results.products.count || 0,
+        customers: results.customers.count || 0,
+        sales: results.sales.count || 0
       });
 
-      console.log('📊 Data loading results:', resultsSummary);
-
+      // Calculate metrics after all data is loaded
       setTimeout(() => {
-        console.log('🔍 BMS State after loading (using refs):', {
-          products: productsRef.current.length,
-          customers: customersRef.current.length,
-          wholesaleSales: wholesaleSalesRef.current.length
-        });
-        
         calculateBusinessMetrics();
-      }, 200);
+      }, 100);
 
     } catch (error) {
       console.error('❌ Error loading business data:', error);
@@ -422,9 +458,9 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
     }
   }, [fetchProducts, fetchCustomers, fetchWholesaleSales, getAuthToken, calculateBusinessMetrics]);
 
-  // Handle saving a new wholesale sale - FIXED VERSION
+  // Handle saving a new wholesale sale
   const handleSaveSale = async (saleData) => {
-    console.log('💾 Starting sale save process...', saleData);
+    console.log('💾 Starting sale save process...');
     setSaving(true);
     
     try {
@@ -435,8 +471,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
 
       const referenceNumber = saleData.referenceNumber || `SALE-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
       
-      console.log('🔍 Generated referenceNumber:', referenceNumber);
-
       let finalCustomerType = saleData.customerType;
       let finalCustomerId = saleData.customerType === 'existing' ? saleData.customerId : null;
       let finalCustomerInfo = saleData.customerType === 'new' ? saleData.customerInfo : null;
@@ -455,22 +489,16 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
       const preparedItems = saleData.items.map(item => {
         let finalProductId = item.productId;
         
-        console.log(`🔍 Processing item: ${item.productName}, ID: ${item.productId}`);
-        
         let costPrice = parseFloat(item.costPrice);
         
         if (!costPrice || costPrice <= 0 || isNaN(costPrice)) {
-          console.warn(`⚠️ Invalid costPrice for ${item.productName}: ${item.costPrice}, using fallback`);
-          
           const product = productsRef.current.find(p => 
             p.id === item.productId || p._id === item.productId
           );
           if (product && product.costPrice) {
             costPrice = parseFloat(product.costPrice);
-            console.log(`💰 Using product's stored cost price: ${costPrice}`);
           } else {
             costPrice = parseFloat(item.unitPrice) * 0.7;
-            console.log(`💰 Final cost price fallback: ${item.unitPrice} * 0.7 = ${costPrice}`);
           }
         }
         
@@ -480,8 +508,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         const quantity = parseFloat(item.quantity) || 0;
         const discount = parseFloat(item.discount) || 0;
         const total = parseFloat(item.total) || 0;
-        
-        console.log(`💰 Final Item ${item.productName}: costPrice=${costPrice}, unitPrice=${unitPrice}, quantity=${quantity}, total=${total}`);
         
         return {
           productId: finalProductId,
@@ -519,17 +545,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         status: 'completed'
       };
 
-      console.log('📤 Final API Payload:', apiPayload);
-
-      const invalidCostItems = preparedItems.filter(item => 
-        !item.costPrice || item.costPrice <= 0 || isNaN(item.costPrice)
-      );
-      
-      if (invalidCostItems.length > 0) {
-        console.error('❌ Items with invalid cost prices:', invalidCostItems);
-        throw new Error(`Invalid cost prices detected for ${invalidCostItems.length} items. Please check product pricing.`);
-      }
-
       const response = await fetch(`${API_BASE_URL}/api/wholesale-sales`, {
         method: 'POST',
         headers: {
@@ -538,21 +553,15 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         },
         body: JSON.stringify(apiPayload)
       });
-
-      console.log('📊 Response status:', response.status);
       
       let responseData;
       try {
         responseData = await response.json();
       } catch (parseError) {
-        console.error('❌ Failed to parse response:', parseError);
         throw new Error('Invalid response from server');
       }
 
       if (!response.ok) {
-        console.error('❌ Backend error details:', responseData);
-        console.error('❌ Backend validation errors:', responseData.error);
-        
         if (responseData.error && responseData.error.includes('costPrice')) {
           throw new Error('Cost price validation failed. Please ensure all products have valid cost prices.');
         }
@@ -560,8 +569,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         throw new Error(responseData.message || `Server error: ${response.status}`);
       }
 
-      console.log('✅ Sale saved successfully:', responseData);
-      
       if (responseData.success) {
         const newSale = {
           ...responseData.wholesaleSale,
@@ -570,8 +577,8 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         
         setWholesaleSales(prevSales => [newSale, ...prevSales]);
         
-        const receipt = {
-          id: responseData.wholesaleSale.referenceNumber || `RCP${String(receipts.length + 1).padStart(3, '0')}`,
+        const todoItem = {
+          id: responseData.wholesaleSale.referenceNumber || `TODO${String(todo.length + 1).padStart(3, '0')}`,
           saleId: responseData.wholesaleSale._id || responseData.wholesaleSale.id,
           customerName: saleData.customerName,
           customerPhone: saleData.customerPhone,
@@ -585,13 +592,12 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
           referenceNumber: responseData.wholesaleSale.referenceNumber
         };
 
-        setReceipts(prevReceipts => [receipt, ...prevReceipts]);
+        setTodo(prevTodo => [todoItem, ...prevTodo]);
         
         updateProductQuantities(saleData.items);
         calculateBusinessMetrics();
 
-        console.log('✅ Sale saved successfully!');
-        alert(`Sale saved successfully! Receipt: ${receipt.id}`);
+        alert(`Sale saved successfully! TODO Item: ${todoItem.id}`);
         
         return responseData;
       } else {
@@ -611,9 +617,7 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
       alert(`Error saving sale: ${userMessage}`);
       throw error;
     } finally {
-      // CRITICAL FIX: Reset saving state after operation completes
       setSaving(false);
-      console.log('🔄 Saving state reset to false');
     }
   };
 
@@ -627,7 +631,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
         });
         if (soldItem) {
           const newQuantity = Math.max(0, (product.quantity || 0) - soldItem.quantity);
-          console.log(`📦 Updated product ${product.name} quantity: ${product.quantity} -> ${newQuantity}`);
           return {
             ...product,
             quantity: newQuantity
@@ -641,7 +644,6 @@ const BMS = ({ isElectron, isOnline, onSync, syncStatus, pendingSyncCount }) => 
   // Handle viewing a sale with full details
   const handleViewSale = async (saleId) => {
     try {
-      console.log(`👀 Viewing sale: ${saleId}`);
       const token = getAuthToken();
       if (!token) {
         throw new Error('No authentication token found');
@@ -726,7 +728,6 @@ Notes: ${sale.saleNotes || 'None'}
     }
     
     try {
-      console.log(`🗑️ Deleting sale: ${saleId}`);
       const token = getAuthToken();
       if (!token) {
         throw new Error('No authentication token found');
@@ -746,11 +747,10 @@ Notes: ${sale.saleNotes || 'None'}
           setWholesaleSales(prevSales => 
             prevSales.filter(sale => sale._id !== saleId && sale.id !== saleId)
           );
-          setReceipts(prevReceipts => 
-            prevReceipts.filter(receipt => receipt.saleId !== saleId)
+          setTodo(prevTodo => 
+            prevTodo.filter(todoItem => todoItem.saleId !== saleId)
           );
           calculateBusinessMetrics();
-          console.log('✅ Sale deleted successfully');
           alert('Sale deleted successfully!');
         } else {
           throw new Error(data.message || 'Failed to delete sale');
@@ -764,34 +764,33 @@ Notes: ${sale.saleNotes || 'None'}
     }
   };
 
-  // Handle printing receipt
-  const handlePrintReceipt = (receiptId) => {
-    const receipt = receipts.find(r => r.id === receiptId);
-    if (receipt) {
-      const receiptContent = `
-        RECEIPT: ${receipt.id}
-        Date: ${new Date(receipt.date).toLocaleDateString()}
+  // Handle printing todo item
+  const handlePrintTodo = (todoId) => {
+    const todoItem = todo.find(t => t.id === todoId);
+    if (todoItem) {
+      const todoContent = `
+        TODO: ${todoItem.id}
+        Date: ${new Date(todoItem.date).toLocaleDateString()}
         
-        Customer: ${receipt.customerName}
-        Phone: ${receipt.customerPhone || 'N/A'}
+        Customer: ${todoItem.customerName}
+        Phone: ${todoItem.customerPhone || 'N/A'}
         
         Items:
-        ${receipt.items?.map(item => `
+        ${todoItem.items?.map(item => `
         • ${item.productName}
           Qty: ${item.quantity} x ${formatCurrency(item.unitPrice)}
           Discount: ${item.discount}%
           Total: ${formatCurrency(item.total)}
         `).join('')}
         
-        Amount: ${formatCurrency(receipt.amount)}
-        Payment Method: ${receipt.paymentMethod}
-        Status: ${receipt.status}
+        Amount: ${formatCurrency(todoItem.amount)}
+        Payment Method: ${todoItem.paymentMethod}
+        Status: ${todoItem.status}
         
         Thank you for your business!
       `;
       
-      console.log('🖨️ Printing receipt:', receipt.id);
-      alert(`Printing receipt:\n${receiptContent}`);
+      alert(`Printing TODO:\n${todoContent}`);
     }
   };
 
@@ -800,7 +799,6 @@ Notes: ${sale.saleNotes || 'None'}
     setLoading(true);
     try {
       await loadBusinessData();
-      console.log('✅ All data refreshed successfully');
     } catch (error) {
       console.error('❌ Error refreshing data:', error);
     } finally {
@@ -901,7 +899,7 @@ Notes: ${sale.saleNotes || 'None'}
               Business Management
             </h1>
             <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-              Manage sales, receipts, and business performance
+              Manage sales, TODO items, and business performance
             </p>
           </div>
           <div className="flex space-x-2">
@@ -944,7 +942,7 @@ Notes: ${sale.saleNotes || 'None'}
       {/* Navigation Tabs */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700">
         <div className="flex border-b border-gray-200 dark:border-gray-700">
-          {['create-sales', 'sales', 'receipts', 'analytics'].map((section) => (
+          {['create-sales', 'sales', 'todo', 'analytics'].map((section) => (
             <button
               key={section}
               onClick={() => setActiveSection(section)}
@@ -956,7 +954,7 @@ Notes: ${sale.saleNotes || 'None'}
             >
               {section === 'create-sales' ? 'Create Sales' :
                section === 'sales' ? 'Sales History' :
-               section === 'receipts' ? 'Receipts' :
+               section === 'todo' ? 'TODO' :
                'Analytics'}
             </button>
           ))}
@@ -987,12 +985,12 @@ Notes: ${sale.saleNotes || 'None'}
         />
       )}
 
-      {activeSection === 'receipts' && (
-        <Receipts
-          receipts={receipts}
+      {activeSection === 'todo' && (
+        <TODO
+          todo={todo}
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
-          onPrintReceipt={handlePrintReceipt}
+          onPrintTodo={handlePrintTodo}
         />
       )}
 
@@ -1000,7 +998,7 @@ Notes: ${sale.saleNotes || 'None'}
         <Analytics
           businessMetrics={businessMetrics}
           wholesaleSales={wholesaleSales}
-          receipts={receipts}
+          todo={todo}
           products={products}
           customers={customers}
         />

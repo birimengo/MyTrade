@@ -767,29 +767,69 @@ exports.getOrder = async (req, res) => {
   }
 };
 
-// Enhanced stock management with comprehensive tracking
+// ==================== FIXED STOCK MANAGEMENT FUNCTIONS ====================
+
+// Enhanced stock management with comprehensive tracking - FIXED VERSION
 exports.updateProductStock = async (order) => {
   try {
-    const product = await Product.findById(order.product);
-    if (!product) {
-      throw new Error(`Product not found: ${order.product}`);
-    }
-
-    console.log(`🔄 Updating stock for order certification:`, {
-      product: product.name,
+    console.log(`🔄 Starting stock update for order certification:`, {
       orderId: order._id,
-      quantity: order.quantity,
-      currentStock: product.quantity
+      productId: order.product,
+      quantity: order.quantity
     });
 
-    // Use the enhanced reduceStock method from Product model
-    const stockUpdate = product.reduceStock(
-      order.quantity,
-      order.retailer, // Using retailer ID as the changer
-      'Order certified by retailer',
-      order._id,
-      `Stock reduced for certified order ${order._id}`
-    );
+    const product = await Product.findById(order.product);
+    if (!product) {
+      console.error(`❌ Product not found: ${order.product}`);
+      // Return success=false but don't throw error - allow certification to proceed
+      return {
+        success: false,
+        error: `Product not found: ${order.product}`,
+        product: null,
+        stockUpdate: null
+      };
+    }
+
+    // Enhanced validation with graceful handling
+    if (typeof product.quantity !== 'number' || product.quantity < 0) {
+      console.warn(`⚠️ Invalid product quantity: ${product.quantity}, proceeding with certification`);
+      return {
+        success: false,
+        error: `Invalid product quantity: ${product.quantity}`,
+        product: product,
+        stockUpdate: null
+      };
+    }
+
+    console.log(`📦 Stock before update:`, {
+      product: product.name,
+      currentStock: product.quantity,
+      orderQuantity: order.quantity
+    });
+
+    // Check if reduceStock method exists, if not use direct update
+    let stockUpdate;
+    if (typeof product.reduceStock === 'function') {
+      // Use the enhanced reduceStock method from Product model
+      stockUpdate = product.reduceStock(
+        order.quantity,
+        order.retailer, // Using retailer ID as the changer
+        'Order certified by retailer',
+        order._id,
+        `Stock reduced for certified order ${order._id}`
+      );
+    } else {
+      // Fallback: Direct stock reduction
+      console.log('⚠️ reduceStock method not found, using direct stock update');
+      const previousQuantity = product.quantity;
+      product.quantity = Math.max(0, product.quantity - order.quantity);
+      stockUpdate = {
+        previousQuantity: previousQuantity,
+        newQuantity: product.quantity,
+        reduction: order.quantity,
+        stockHistoryId: null
+      };
+    }
 
     await product.save();
     
@@ -798,11 +838,11 @@ exports.updateProductStock = async (order) => {
       orderId: order._id,
       previousStock: stockUpdate.previousQuantity,
       newStock: stockUpdate.newQuantity,
-      reduction: order.quantity,
-      stockHistoryId: stockUpdate.stockHistoryId
+      reduction: order.quantity
     });
     
     return {
+      success: true,
       product,
       stockUpdate,
       lowStockAlert: product.lowStockAlert,
@@ -810,33 +850,62 @@ exports.updateProductStock = async (order) => {
     };
   } catch (error) {
     console.error('❌ Error updating product stock:', error);
-    throw error;
+    
+    // CRITICAL FIX: Don't throw error - return failure object instead
+    return {
+      success: false,
+      error: error.message,
+      product: null,
+      stockUpdate: null,
+      orderId: order._id,
+      productId: order.product
+    };
   }
 };
 
-// Enhanced stock restoration with comprehensive tracking
+// Enhanced stock restoration with comprehensive tracking - FIXED VERSION
 exports.restoreProductStock = async (order) => {
   try {
-    const product = await Product.findById(order.product);
-    if (!product) {
-      throw new Error(`Product not found: ${order.product}`);
-    }
-
     console.log(`🔄 Restoring stock for order return:`, {
-      product: product.name,
       orderId: order._id,
-      quantity: order.quantity,
-      currentStock: product.quantity
+      productId: order.product,
+      quantity: order.quantity
     });
 
-    // Use the enhanced restoreStock method from Product model
-    const stockUpdate = product.restoreStock(
-      order.quantity,
-      order.wholesaler, // Using wholesaler ID as the changer
-      'Order return accepted by wholesaler',
-      order._id,
-      `Stock restored for returned order ${order._id}`
-    );
+    const product = await Product.findById(order.product);
+    if (!product) {
+      console.error(`❌ Product not found: ${order.product}`);
+      return {
+        success: false,
+        error: `Product not found: ${order.product}`,
+        product: null,
+        stockUpdate: null
+      };
+    }
+
+    // Check if restoreStock method exists, if not use direct update
+    let stockUpdate;
+    if (typeof product.restoreStock === 'function') {
+      // Use the enhanced restoreStock method from Product model
+      stockUpdate = product.restoreStock(
+        order.quantity,
+        order.wholesaler, // Using wholesaler ID as the changer
+        'Order return accepted by wholesaler',
+        order._id,
+        `Stock restored for returned order ${order._id}`
+      );
+    } else {
+      // Fallback: Direct stock restoration
+      console.log('⚠️ restoreStock method not found, using direct stock restoration');
+      const previousQuantity = product.quantity;
+      product.quantity = product.quantity + order.quantity;
+      stockUpdate = {
+        previousQuantity: previousQuantity,
+        newQuantity: product.quantity,
+        restoration: order.quantity,
+        stockHistoryId: null
+      };
+    }
 
     await product.save();
     
@@ -845,11 +914,11 @@ exports.restoreProductStock = async (order) => {
       orderId: order._id,
       previousStock: stockUpdate.previousQuantity,
       newStock: stockUpdate.newQuantity,
-      restoration: order.quantity,
-      stockHistoryId: stockUpdate.stockHistoryId
+      restoration: order.quantity
     });
     
     return {
+      success: true,
       product,
       stockUpdate,
       lowStockAlert: product.lowStockAlert,
@@ -857,11 +926,22 @@ exports.restoreProductStock = async (order) => {
     };
   } catch (error) {
     console.error('❌ Error restoring product stock:', error);
-    throw error;
+    
+    // CRITICAL FIX: Don't throw error - return failure object instead
+    return {
+      success: false,
+      error: error.message,
+      product: null,
+      stockUpdate: null,
+      orderId: order._id,
+      productId: order.product
+    };
   }
 };
 
-// Enhanced update order status with comprehensive stock management
+// ==================== FIXED UPDATE ORDER STATUS FUNCTION ====================
+
+// Enhanced update order status with comprehensive stock management - FIXED VERSION
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -938,50 +1018,66 @@ exports.updateOrderStatus = async (req, res) => {
       order.transporter = null;
     }
 
-    // Handle delivery certification by retailer - ENHANCED STOCK UPDATE
+    // Handle delivery certification by retailer - FIXED STOCK UPDATE WITH GRACEFUL DEGRADATION
     if (status === 'certified') {
       order.deliveryCertificationDate = new Date();
       order.paymentStatus = 'paid';
       
-      // Enhanced product stock quantity update when order is certified
+      // CRITICAL FIX: Enhanced product stock quantity update with graceful error handling
       try {
         const stockUpdateResult = await this.updateProductStock(order);
         
-        console.log(`📦 Stock updated for certified order:`, {
-          orderId: order._id,
-          productId: order.product,
-          quantityReduced: order.quantity,
-          stockUpdate: stockUpdateResult.stockUpdate,
-          lowStockAlert: stockUpdateResult.lowStockAlert
-        });
+        if (stockUpdateResult.success) {
+          console.log(`📦 Stock updated for certified order:`, {
+            orderId: order._id,
+            productId: order.product,
+            quantityReduced: order.quantity,
+            stockUpdate: stockUpdateResult.stockUpdate,
+            lowStockAlert: stockUpdateResult.lowStockAlert
+          });
 
-        // Add stock update info to order metadata
-        order.metadata = order.metadata || {};
-        order.metadata.stockUpdate = {
-          previousStock: stockUpdateResult.stockUpdate.previousQuantity,
-          newStock: stockUpdateResult.stockUpdate.newQuantity,
-          reducedBy: order.quantity,
-          updatedAt: new Date(),
-          lowStockAlertTriggered: stockUpdateResult.lowStockAlert
-        };
+          // Add stock update info to order metadata
+          order.metadata = order.metadata || {};
+          order.metadata.stockUpdate = {
+            previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
+            newStock: stockUpdateResult.stockUpdate?.newQuantity,
+            reducedBy: order.quantity,
+            updatedAt: new Date(),
+            lowStockAlertTriggered: stockUpdateResult.lowStockAlert,
+            success: true
+          };
+        } else {
+          console.warn(`⚠️ Stock update failed but order certification proceeding:`, stockUpdateResult.error);
+          
+          // CRITICAL FIX: Continue with certification even if stock update fails
+          order.metadata = order.metadata || {};
+          order.metadata.stockUpdate = {
+            success: false,
+            error: stockUpdateResult.error,
+            updatedAt: new Date(),
+            note: 'Order certified but stock update failed - manual adjustment required'
+          };
+        }
         
       } catch (stockError) {
-        console.error('❌ Error updating product stock during certification:', stockError);
-        return res.status(500).json({
+        console.error('❌ Unexpected error during stock update process:', stockError);
+        
+        // CRITICAL FIX: Continue with order certification even if stock update fails completely
+        order.metadata = order.metadata || {};
+        order.metadata.stockUpdate = {
           success: false,
-          message: 'Error updating product stock during certification',
           error: stockError.message,
-          orderId: order._id,
-          productId: order.product
-        });
+          updatedAt: new Date(),
+          critical: false // Mark as non-critical failure
+        };
       }
       
-      // Add system stock when order is certified
+      // Add system stock when order is certified (with error handling)
       try {
         await addSystemStockFromOrder(order);
-      } catch (stockError) {
-        console.error('Error adding system stock:', stockError);
-        // Continue with order update even if system stock update fails
+      } catch (systemStockError) {
+        console.error('⚠️ System stock update failed:', systemStockError);
+        // Continue with order update
       }
 
       // Enhanced notification for certification
@@ -989,14 +1085,14 @@ exports.updateOrderStatus = async (req, res) => {
         user: order.retailer,
         type: 'order_status_update',
         title: 'Order Certified ✅',
-        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully. Stock has been updated.`,
+        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully.`,
         data: {
           orderId: order._id,
           status: 'certified',
           productName: order.product?.name,
           quantity: order.quantity,
           totalPrice: order.totalPrice,
-          stockUpdated: true,
+          stockUpdated: order.metadata?.stockUpdate?.success || false,
           deliveryCertificationDate: order.deliveryCertificationDate
         },
         priority: 'medium',
@@ -1011,7 +1107,7 @@ exports.updateOrderStatus = async (req, res) => {
           status: 'certified',
           previousStatus: previousStatus,
           notification: certificationNotification,
-          stockUpdated: true,
+          stockUpdated: order.metadata?.stockUpdate?.success || false,
           timestamp: new Date()
         });
       }
@@ -1099,7 +1195,7 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Handle return acceptance by wholesaler - ENHANCED STOCK RESTORATION
+    // Handle return acceptance by wholesaler - FIXED STOCK RESTORATION
     if (status === 'return_accepted') {
       order.returnDetails.returnAcceptedAt = new Date();
       order.returnCompletedAt = new Date();
@@ -1109,27 +1205,44 @@ exports.updateOrderStatus = async (req, res) => {
       try {
         const stockRestoreResult = await this.restoreProductStock(order);
         
-        console.log(`📦 Stock restored for returned order:`, {
-          orderId: order._id,
-          productId: order.product,
-          quantityRestored: order.quantity,
-          stockUpdate: stockRestoreResult.stockUpdate,
-          lowStockAlert: stockRestoreResult.lowStockAlert
-        });
+        if (stockRestoreResult.success) {
+          console.log(`📦 Stock restored for returned order:`, {
+            orderId: order._id,
+            productId: order.product,
+            quantityRestored: order.quantity,
+            stockUpdate: stockRestoreResult.stockUpdate,
+            lowStockAlert: stockRestoreResult.lowStockAlert
+          });
 
-        // Add stock restoration info to order metadata
-        order.metadata = order.metadata || {};
-        order.metadata.stockRestoration = {
-          previousStock: stockRestoreResult.stockUpdate.previousQuantity,
-          newStock: stockRestoreResult.stockUpdate.newQuantity,
-          restoredBy: order.quantity,
-          updatedAt: new Date(),
-          lowStockAlertResolved: !stockRestoreResult.lowStockAlert
-        };
+          // Add stock restoration info to order metadata
+          order.metadata = order.metadata || {};
+          order.metadata.stockRestoration = {
+            previousStock: stockRestoreResult.stockUpdate.previousQuantity,
+            newStock: stockRestoreResult.stockUpdate.newQuantity,
+            restoredBy: order.quantity,
+            updatedAt: new Date(),
+            lowStockAlertResolved: !stockRestoreResult.lowStockAlert,
+            success: true
+          };
+        } else {
+          console.warn(`⚠️ Stock restoration failed but return accepted:`, stockRestoreResult.error);
+          order.metadata = order.metadata || {};
+          order.metadata.stockRestoration = {
+            success: false,
+            error: stockRestoreResult.error,
+            updatedAt: new Date()
+          };
+        }
         
       } catch (stockError) {
         console.error('❌ Error restoring product stock during return:', stockError);
         // Continue with return processing even if stock update fails
+        order.metadata = order.metadata || {};
+        order.metadata.stockRestoration = {
+          success: false,
+          error: stockError.message,
+          updatedAt: new Date()
+        };
       }
 
       // Enhanced return acceptance notification
@@ -1137,12 +1250,12 @@ exports.updateOrderStatus = async (req, res) => {
         user: order.retailer,
         type: 'order_status_update',
         title: 'Return Accepted ✅',
-        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded. Stock has been restored.`,
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
         data: {
           orderId: order._id,
           status: 'return_accepted',
           refundAmount: order.totalPrice,
-          stockRestored: true,
+          stockRestored: order.metadata?.stockRestoration?.success || false,
           returnCompletedAt: order.returnCompletedAt
         },
         priority: 'medium',
@@ -1157,7 +1270,7 @@ exports.updateOrderStatus = async (req, res) => {
           status: 'return_accepted',
           refundAmount: order.totalPrice,
           notification: returnAcceptNotification,
-          stockRestored: true,
+          stockRestored: order.metadata?.stockRestoration?.success || false,
           timestamp: new Date()
         });
       }
@@ -1399,8 +1512,8 @@ exports.updateOrderStatus = async (req, res) => {
         newStatus: status,
         changedBy: req.user.id,
         changedAt: new Date(),
-        stockUpdated: status === 'certified',
-        stockRestored: status === 'return_accepted'
+        stockUpdated: status === 'certified' ? (order.metadata?.stockUpdate?.success || false) : false,
+        stockRestored: status === 'return_accepted' ? (order.metadata?.stockRestoration?.success || false) : false
       },
       metadata: {
         notificationSent: true,
@@ -1617,13 +1730,20 @@ exports.handleReturnRequest = async (req, res) => {
         const stockRestoreResult = await this.restoreProductStock(order);
         order.metadata = order.metadata || {};
         order.metadata.returnStockRestoration = {
-          previousStock: stockRestoreResult.stockUpdate.previousQuantity,
-          newStock: stockRestoreResult.stockUpdate.newQuantity,
+          previousStock: stockRestoreResult.stockUpdate?.previousQuantity,
+          newStock: stockRestoreResult.stockUpdate?.newQuantity,
           restoredBy: order.quantity,
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          success: stockRestoreResult.success || false
         };
       } catch (stockError) {
         console.error('Error restoring stock during return acceptance:', stockError);
+        order.metadata = order.metadata || {};
+        order.metadata.returnStockRestoration = {
+          success: false,
+          error: stockError.message,
+          updatedAt: new Date()
+        };
       }
     } else if (action === 'reject') {
       // Enhanced return rejection
@@ -1657,7 +1777,7 @@ exports.handleReturnRequest = async (req, res) => {
           returnNotes: returnNotes,
           inspectionNotes: inspectionNotes,
           condition: order.returnDetails.condition,
-          stockRestored: true,
+          stockRestored: order.metadata?.returnStockRestoration?.success || false,
           returnCompletedAt: order.returnCompletedAt
         },
         priority: 'medium',
@@ -1729,7 +1849,7 @@ exports.handleReturnRequest = async (req, res) => {
         handledAt: new Date(),
         ...(action === 'accept' && {
           refundAmount: order.totalPrice,
-          stockRestored: true
+          stockRestored: order.metadata?.returnStockRestoration?.success || false
         }),
         ...(action === 'reject' && {
           rejectionReason: rejectionReason

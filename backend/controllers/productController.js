@@ -1,3 +1,4 @@
+// controllers/productController.js
 const Product = require('../models/Product');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
@@ -63,6 +64,8 @@ exports.getProducts = async (req, res) => {
       .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
       .populate('lastPriceChange.changedBy', 'firstName lastName email')
       .populate('priceHistory.changedBy', 'firstName lastName email')
+      .populate('restockHistory.restockedBy', 'firstName lastName email')
+      .populate('lastRestock.restockedBy', 'firstName lastName email')
       .sort({ fromCertifiedOrder: 1, createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -136,7 +139,7 @@ exports.getProductsForRetailers = async (req, res) => {
   }
 };
 
-// Get single product with price history
+// Get single product with comprehensive data
 exports.getProduct = async (req, res) => {
   try {
     const product = await Product.findOne({
@@ -145,7 +148,10 @@ exports.getProduct = async (req, res) => {
     })
     .populate('certifiedOrderSource.supplierId', 'businessName firstName lastName')
     .populate('lastPriceChange.changedBy', 'firstName lastName email')
-    .populate('priceHistory.changedBy', 'firstName lastName email');
+    .populate('priceHistory.changedBy', 'firstName lastName email')
+    .populate('restockHistory.restockedBy', 'firstName lastName email')
+    .populate('lastRestock.restockedBy', 'firstName lastName email')
+    .populate('stockHistory.changedBy', 'firstName lastName email');
 
     if (!product) {
       return res.status(404).json({
@@ -156,7 +162,15 @@ exports.getProduct = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      product
+      product: {
+        ...product.toObject(),
+        profitMargin: product.profitMargin,
+        profitPerUnit: product.profitPerUnit,
+        totalProfitPotential: product.totalProfitPotential,
+        stockValue: product.stockValue,
+        potentialRevenue: product.potentialRevenue,
+        restockAnalytics: product.restockAnalytics
+      }
     });
   } catch (error) {
     res.status(500).json({
@@ -167,7 +181,7 @@ exports.getProduct = async (req, res) => {
   }
 };
 
-// Create new product with comprehensive price history
+// Create new product with comprehensive tracking
 exports.createProduct = async (req, res) => {
   try {
     let imageUrls = [];
@@ -208,6 +222,30 @@ exports.createProduct = async (req, res) => {
         lowestPrice: parseFloat(req.body.price),
         averagePrice: parseFloat(req.body.price),
         priceChangeCount: 1
+      },
+      // Initialize stock history
+      stockHistory: [{
+        previousQuantity: 0,
+        newQuantity: parseInt(req.body.quantity),
+        changeAmount: parseInt(req.body.quantity),
+        changeType: 'initial_stock',
+        changedBy: req.user.id,
+        reason: 'Initial stock',
+        note: 'Initial product stock'
+      }],
+      stockStatistics: {
+        totalStockIn: parseInt(req.body.quantity),
+        totalStockOut: 0,
+        stockChangeCount: 1,
+        lastStockInDate: new Date()
+      },
+      // Initialize restock statistics
+      restockStatistics: {
+        totalRestocks: 0,
+        totalQuantityAdded: 0,
+        totalInvestment: 0,
+        lastRestockDate: null,
+        averageRestockQuantity: 0
       }
     };
 
@@ -228,7 +266,9 @@ exports.createProduct = async (req, res) => {
         ...product.toObject(),
         profitMargin: product.profitMargin,
         profitPerUnit: product.profitPerUnit,
-        totalProfitPotential: product.totalProfitPotential
+        totalProfitPotential: product.totalProfitPotential,
+        stockValue: product.stockValue,
+        potentialRevenue: product.potentialRevenue
       }
     });
   } catch (error) {
@@ -306,7 +346,7 @@ exports.updateProductPrice = async (req, res) => {
   }
 };
 
-// Update product with enhanced price tracking
+// Update product with enhanced tracking
 exports.updateProduct = async (req, res) => {
   try {
     let product = await Product.findOne({
@@ -380,7 +420,8 @@ exports.updateProduct = async (req, res) => {
     // Populate the updated product
     const updatedProduct = await Product.findById(req.params.id)
       .populate('lastPriceChange.changedBy', 'firstName lastName email')
-      .populate('priceHistory.changedBy', 'firstName lastName email');
+      .populate('priceHistory.changedBy', 'firstName lastName email')
+      .populate('restockHistory.restockedBy', 'firstName lastName email');
 
     if (!product.fromCertifiedOrder) {
       delete updateData.fromCertifiedOrder;
@@ -394,7 +435,9 @@ exports.updateProduct = async (req, res) => {
         ...updatedProduct.toObject(),
         profitMargin: updatedProduct.profitMargin,
         profitPerUnit: updatedProduct.profitPerUnit,
-        totalProfitPotential: updatedProduct.totalProfitPotential
+        totalProfitPotential: updatedProduct.totalProfitPotential,
+        stockValue: updatedProduct.stockValue,
+        potentialRevenue: updatedProduct.potentialRevenue
       }
     });
   } catch (error) {
@@ -405,6 +448,277 @@ exports.updateProduct = async (req, res) => {
     });
   }
 };
+
+// ==================== RESTOCK FUNCTIONALITY ====================
+
+// Restock product
+exports.restockProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      quantityToAdd,
+      newPrice,
+      newMinOrderQuantity,
+      costPrice,
+      reason = 'Restock',
+      note = ''
+    } = req.body;
+
+    const product = await Product.findOne({
+      _id: id,
+      wholesaler: req.user.id
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Validate required fields
+    if (!quantityToAdd || quantityToAdd <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity to add must be a positive number'
+      });
+    }
+
+    // Prepare restock data
+    const restockData = {
+      quantityToAdd: parseInt(quantityToAdd)
+    };
+
+    // Optional fields
+    if (newPrice !== undefined) {
+      restockData.newPrice = parseFloat(newPrice);
+    }
+
+    if (newMinOrderQuantity !== undefined) {
+      restockData.newMinOrderQuantity = parseInt(newMinOrderQuantity);
+    }
+
+    if (costPrice !== undefined) {
+      restockData.costPrice = parseFloat(costPrice);
+    }
+
+    // Perform restock
+    const restockResult = product.restock(restockData, req.user.id, reason, note);
+    await product.save();
+
+    // Populate the updated product
+    const updatedProduct = await Product.findById(id)
+      .populate('restockHistory.restockedBy', 'firstName lastName email')
+      .populate('lastRestock.restockedBy', 'firstName lastName email')
+      .populate('lastStockChange.changedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Product restocked successfully',
+      restockDetails: restockResult,
+      product: {
+        _id: updatedProduct._id,
+        name: updatedProduct.name,
+        quantity: updatedProduct.quantity,
+        price: updatedProduct.price,
+        costPrice: updatedProduct.costPrice,
+        minOrderQuantity: updatedProduct.minOrderQuantity,
+        restockStatistics: updatedProduct.restockStatistics,
+        lastRestock: updatedProduct.lastRestock
+      }
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: 'Error restocking product',
+      error: error.message
+    });
+  }
+};
+
+// Get restock history for a product
+exports.getRestockHistory = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, startDate, endDate } = req.query;
+    
+    const product = await Product.findOne({
+      _id: req.params.id,
+      wholesaler: req.user.id
+    })
+    .populate('restockHistory.restockedBy', 'firstName lastName email avatar')
+    .select('restockHistory name sku quantity price costPrice restockStatistics');
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    let filteredHistory = [...product.restockHistory];
+
+    // Apply date filters
+    if (startDate) {
+      const start = new Date(startDate);
+      filteredHistory = filteredHistory.filter(entry => new Date(entry.restockedAt) >= start);
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      filteredHistory = filteredHistory.filter(entry => new Date(entry.restockedAt) <= end);
+    }
+
+    // Sort by date (newest first)
+    const sortedHistory = filteredHistory.sort((a, b) => 
+      new Date(b.restockedAt) - new Date(a.restockedAt)
+    );
+
+    // Paginate the history
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const paginatedHistory = sortedHistory.slice(startIndex, endIndex);
+
+    // Calculate restock statistics
+    const totalQuantityAdded = sortedHistory.reduce((sum, entry) => 
+      sum + entry.quantityAdded, 0
+    );
+    
+    const totalInvestment = sortedHistory.reduce((sum, entry) => 
+      sum + entry.investment, 0
+    );
+
+    res.status(200).json({
+      success: true,
+      product: {
+        name: product.name,
+        sku: product.sku,
+        currentQuantity: product.quantity,
+        currentPrice: product.price,
+        costPrice: product.costPrice,
+        restockStatistics: product.restockStatistics
+      },
+      restockHistory: paginatedHistory,
+      historyStats: {
+        totalEntries: sortedHistory.length,
+        totalQuantityAdded,
+        totalInvestment,
+        averageRestockQuantity: sortedHistory.length > 0 ? 
+          totalQuantityAdded / sortedHistory.length : 0
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(sortedHistory.length / limit),
+        totalItems: sortedHistory.length,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching restock history',
+      error: error.message
+    });
+  }
+};
+
+// Get products that need restocking
+exports.getProductsNeedingRestock = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    
+    const result = await Product.getProductsNeedingRestock(req.user.id, { page, limit });
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching products needing restock',
+      error: error.message
+    });
+  }
+};
+
+// Get restock analytics for dashboard
+exports.getRestockAnalytics = async (req, res) => {
+  try {
+    const products = await Product.find({
+      wholesaler: req.user.id,
+      isActive: true
+    }).select('name quantity restockHistory restockStatistics');
+
+    const analytics = {
+      totalProducts: products.length,
+      productsWithRestocks: 0,
+      totalRestocks: 0,
+      totalQuantityAdded: 0,
+      totalInvestment: 0,
+      averageRestocksPerProduct: 0,
+      recentlyRestocked: [],
+      productsNeedingRestock: 0
+    };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    products.forEach(product => {
+      if (product.restockStatistics.totalRestocks > 0) {
+        analytics.productsWithRestocks++;
+        analytics.totalRestocks += product.restockStatistics.totalRestocks;
+        analytics.totalQuantityAdded += product.restockStatistics.totalQuantityAdded;
+        analytics.totalInvestment += product.restockStatistics.totalInvestment;
+      }
+
+      // Check recent restocks
+      const recentRestocks = product.restockHistory.filter(entry => 
+        new Date(entry.restockedAt) > thirtyDaysAgo
+      );
+
+      if (recentRestocks.length > 0) {
+        analytics.recentlyRestocked.push({
+          productName: product.name,
+          restocks: recentRestocks.length,
+          quantityAdded: recentRestocks.reduce((sum, entry) => 
+            sum + entry.quantityAdded, 0
+          ),
+          latestRestock: recentRestocks[0]
+        });
+      }
+
+      // Check if product needs restocking
+      if (product.originalStockQuantity && product.originalStockQuantity > 0) {
+        const threshold = product.originalStockQuantity * product.lowStockThreshold;
+        if (product.quantity <= threshold) {
+          analytics.productsNeedingRestock++;
+        }
+      }
+    });
+
+    analytics.averageRestocksPerProduct = analytics.totalProducts > 0 ? 
+      (analytics.totalRestocks / analytics.totalProducts).toFixed(1) : 0;
+
+    // Sort recently restocked by most recent
+    analytics.recentlyRestocked.sort((a, b) => 
+      new Date(b.latestRestock.restockedAt) - new Date(a.latestRestock.restockedAt)
+    ).slice(0, 10); // Top 10 most recent
+
+    res.status(200).json({
+      success: true,
+      analytics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching restock analytics',
+      error: error.message
+    });
+  }
+};
+
+// ==================== PRICE HISTORY FUNCTIONALITY ====================
 
 // Enhanced price history with pagination and filtering
 exports.getPriceHistory = async (req, res) => {
@@ -543,27 +857,6 @@ exports.generateSamplePriceHistory = async (req, res) => {
   }
 };
 
-// Track price change during sale
-exports.trackSalePriceChange = async (productId, newPrice, userId, saleReference, reason = 'Sale price adjustment') => {
-  try {
-    const product = await Product.findById(productId);
-    
-    if (product && product.price !== newPrice) {
-      product.updatePrice(
-        newPrice, 
-        userId, 
-        reason, 
-        saleReference, 
-        'sale', 
-        `Price changed during sale: ${saleReference}`
-      );
-      await product.save();
-    }
-  } catch (error) {
-    console.error('Error tracking sale price change:', error);
-  }
-};
-
 // Get price analytics for dashboard
 exports.getPriceAnalytics = async (req, res) => {
   try {
@@ -642,6 +935,155 @@ exports.getPriceAnalytics = async (req, res) => {
     });
   }
 };
+
+// ==================== STOCK HISTORY FUNCTIONALITY ====================
+
+// Get stock history for a product
+exports.getStockHistory = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, changeType, startDate, endDate } = req.query;
+    
+    const product = await Product.findOne({
+      _id: req.params.id,
+      wholesaler: req.user.id
+    })
+    .populate('stockHistory.changedBy', 'firstName lastName email avatar')
+    .select('stockHistory name sku quantity stockStatistics');
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    const stockHistoryResult = product.getStockHistory({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      changeType,
+      startDate,
+      endDate
+    });
+
+    res.status(200).json({
+      success: true,
+      product: {
+        name: product.name,
+        sku: product.sku,
+        currentQuantity: product.quantity,
+        stockStatistics: product.stockStatistics
+      },
+      ...stockHistoryResult
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching stock history',
+      error: error.message
+    });
+  }
+};
+
+// Get stock analytics for dashboard
+exports.getStockAnalytics = async (req, res) => {
+  try {
+    const products = await Product.find({
+      wholesaler: req.user.id,
+      isActive: true
+    }).select('name quantity stockHistory stockStatistics lowStockAlert');
+
+    const analytics = {
+      totalProducts: products.length,
+      totalStockValue: 0,
+      lowStockProducts: 0,
+      outOfStockProducts: 0,
+      totalStockChanges: 0,
+      stockMovement: {
+        totalIn: 0,
+        totalOut: 0,
+        netChange: 0
+      },
+      recentlyUpdatedStock: []
+    };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    products.forEach(product => {
+      // Calculate stock value
+      const stockValue = (product.costPrice || 0) * product.quantity;
+      analytics.totalStockValue += stockValue;
+
+      // Count low stock and out of stock products
+      if (product.lowStockAlert) {
+        analytics.lowStockProducts++;
+      }
+
+      if (product.quantity === 0) {
+        analytics.outOfStockProducts++;
+      }
+
+      // Add stock statistics
+      analytics.totalStockChanges += product.stockStatistics.stockChangeCount;
+      analytics.stockMovement.totalIn += product.stockStatistics.totalStockIn;
+      analytics.stockMovement.totalOut += product.stockStatistics.totalStockOut;
+
+      // Check recent stock changes
+      const recentChanges = product.stockHistory.filter(entry => 
+        new Date(entry.changedAt) > thirtyDaysAgo
+      );
+
+      if (recentChanges.length > 0) {
+        analytics.recentlyUpdatedStock.push({
+          productName: product.name,
+          changes: recentChanges.length,
+          latestChange: recentChanges[0]
+        });
+      }
+    });
+
+    analytics.stockMovement.netChange = analytics.stockMovement.totalIn - analytics.stockMovement.totalOut;
+
+    // Sort recently updated by most recent
+    analytics.recentlyUpdatedStock.sort((a, b) => 
+      new Date(b.latestChange.changedAt) - new Date(a.latestChange.changedAt)
+    ).slice(0, 10); // Top 10 most recent
+
+    res.status(200).json({
+      success: true,
+      analytics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching stock analytics',
+      error: error.message
+    });
+  }
+};
+
+// Track price change during sale
+exports.trackSalePriceChange = async (productId, newPrice, userId, saleReference, reason = 'Sale price adjustment') => {
+  try {
+    const product = await Product.findById(productId);
+    
+    if (product && product.price !== newPrice) {
+      product.updatePrice(
+        newPrice, 
+        userId, 
+        reason, 
+        saleReference, 
+        'sale', 
+        `Price changed during sale: ${saleReference}`
+      );
+      await product.save();
+    }
+  } catch (error) {
+    console.error('Error tracking sale price change:', error);
+  }
+};
+
+// ==================== EXISTING FUNCTIONALITY ====================
 
 // Delete product
 exports.deleteProduct = async (req, res) => {
@@ -761,7 +1203,8 @@ exports.getProfitAnalytics = async (req, res) => {
       lowStockProducts: 0,
       outOfStockProducts: 0,
       productsWithEditedPrices: 0,
-      productsWithPriceHistory: 0
+      productsWithPriceHistory: 0,
+      productsWithRestocks: 0
     };
 
     products.forEach(product => {
@@ -787,6 +1230,10 @@ exports.getProfitAnalytics = async (req, res) => {
 
       if (product.priceHistory.length > 1) {
         analytics.productsWithPriceHistory++;
+      }
+
+      if (product.restockStatistics.totalRestocks > 0) {
+        analytics.productsWithRestocks++;
       }
     });
 

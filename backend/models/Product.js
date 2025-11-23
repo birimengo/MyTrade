@@ -52,7 +52,7 @@ const priceHistorySchema = new mongoose.Schema({
   },
   changeType: {
     type: String,
-    enum: ['manual', 'sale', 'market_adjustment', 'cost_change', 'promotional', 'bulk_update', 'initial', 'auto_adjustment'],
+    enum: ['manual', 'sale', 'market_adjustment', 'cost_change', 'promotional', 'bulk_update', 'initial', 'auto_adjustment', 'restock'],
     default: 'manual'
   },
   note: {
@@ -76,7 +76,7 @@ const stockHistorySchema = new mongoose.Schema({
   },
   changeType: {
     type: String,
-    enum: ['stock_in', 'stock_out', 'manual_adjustment', 'order_certified', 'return_processed', 'initial_stock'],
+    enum: ['stock_in', 'stock_out', 'manual_adjustment', 'order_certified', 'return_processed', 'initial_stock', 'restock'],
     required: true
   },
   changedAt: {
@@ -97,6 +97,64 @@ const stockHistorySchema = new mongoose.Schema({
   },
   note: {
     type: String
+  }
+});
+
+// Restock history schema for tracking restock operations
+const restockHistorySchema = new mongoose.Schema({
+  previousQuantity: {
+    type: Number,
+    required: true
+  },
+  newQuantity: {
+    type: Number,
+    required: true
+  },
+  quantityAdded: {
+    type: Number,
+    required: true
+  },
+  previousPrice: {
+    type: Number
+  },
+  newPrice: {
+    type: Number
+  },
+  previousMinOrderQuantity: {
+    type: Number
+  },
+  newMinOrderQuantity: {
+    type: Number
+  },
+  previousCostPrice: {
+    type: Number
+  },
+  newCostPrice: {
+    type: Number
+  },
+  restockedAt: {
+    type: Date,
+    default: Date.now
+  },
+  restockedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  reason: {
+    type: String,
+    default: 'Restock'
+  },
+  note: {
+    type: String
+  },
+  investment: {
+    type: Number,
+    required: true
+  },
+  totalStockValue: {
+    type: Number,
+    required: true
   }
 });
 
@@ -285,6 +343,47 @@ const productSchema = new mongoose.Schema({
       type: Number,
       default: 0
     }
+  },
+  // Restock History
+  restockHistory: [restockHistorySchema],
+  // Restock Statistics
+  restockStatistics: {
+    totalRestocks: {
+      type: Number,
+      default: 0
+    },
+    totalQuantityAdded: {
+      type: Number,
+      default: 0
+    },
+    totalInvestment: {
+      type: Number,
+      default: 0
+    },
+    lastRestockDate: {
+      type: Date
+    },
+    averageRestockQuantity: {
+      type: Number,
+      default: 0
+    }
+  },
+  // Last restock information
+  lastRestock: {
+    quantityAdded: Number,
+    previousQuantity: Number,
+    newQuantity: Number,
+    previousPrice: Number,
+    newPrice: Number,
+    previousMinOrderQuantity: Number,
+    newMinOrderQuantity: Number,
+    investment: Number,
+    restockedAt: Date,
+    restockedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    reason: String
   }
 }, {
   timestamps: true
@@ -328,6 +427,11 @@ productSchema.virtual('potentialRevenue').get(function() {
     return (this.price * this.quantity).toFixed(2);
   }
   return 0;
+});
+
+// Virtual for restock analytics
+productSchema.virtual('restockAnalytics').get(function() {
+  return this.getRestockAnalytics(30); // Last 30 days
 });
 
 // Generate SKU before saving
@@ -546,6 +650,237 @@ productSchema.methods.getStockAnalytics = function(days = 30) {
     stockInCount: stockIn.length,
     lowStockAlert: this.lowStockAlert,
     currentStock: this.quantity
+  };
+};
+
+// ==================== RESTOCK MANAGEMENT METHODS ====================
+
+// Method to restock product with comprehensive tracking
+productSchema.methods.restock = function(restockData, userId, reason = 'Restock', note = '') {
+  const {
+    quantityToAdd,
+    newPrice,
+    newMinOrderQuantity,
+    costPrice
+  } = restockData;
+
+  const previousQuantity = this.quantity;
+  const previousPrice = this.price;
+  const previousMinOrderQuantity = this.minOrderQuantity;
+  const previousCostPrice = this.costPrice;
+  
+  const newQuantity = previousQuantity + (quantityToAdd || 0);
+  const finalPrice = newPrice !== undefined ? parseFloat(newPrice) : previousPrice;
+  const finalMinOrderQuantity = newMinOrderQuantity !== undefined ? parseInt(newMinOrderQuantity) : previousMinOrderQuantity;
+  const finalCostPrice = costPrice !== undefined ? parseFloat(costPrice) : previousCostPrice;
+  
+  // Validate selling price is not less than cost price
+  if (finalPrice < finalCostPrice) {
+    throw new Error(`Selling price (${finalPrice}) cannot be less than cost price (${finalCostPrice})`);
+  }
+
+  // Calculate investment for this restock
+  const investment = (quantityToAdd || 0) * finalCostPrice;
+  const totalStockValue = newQuantity * finalCostPrice;
+
+  // Add to restock history
+  const restockRecord = {
+    previousQuantity,
+    newQuantity,
+    quantityAdded: quantityToAdd || 0,
+    previousPrice,
+    newPrice: finalPrice,
+    previousMinOrderQuantity,
+    newMinOrderQuantity: finalMinOrderQuantity,
+    previousCostPrice,
+    newCostPrice: finalCostPrice,
+    restockedBy: userId,
+    reason,
+    note,
+    investment,
+    totalStockValue
+  };
+
+  this.restockHistory.push(restockRecord);
+
+  // Update last restock information
+  this.lastRestock = {
+    ...restockRecord,
+    restockedAt: new Date()
+  };
+
+  // Update product fields
+  this.quantity = newQuantity;
+  if (newPrice !== undefined) {
+    this.price = finalPrice;
+    
+    // Add to price history if price changed
+    if (finalPrice !== previousPrice) {
+      this.priceHistory.push({
+        sellingPrice: finalPrice,
+        costPrice: finalCostPrice,
+        changedAt: new Date(),
+        changedBy: userId,
+        reason: `Price update during restock: ${reason}`,
+        changeType: 'restock',
+        note: note
+      });
+
+      // Update last price change
+      this.lastPriceChange = {
+        previousPrice: previousPrice,
+        newPrice: finalPrice,
+        changedAt: new Date(),
+        changedBy: userId,
+        reason: `Price update during restock: ${reason}`,
+        changeType: 'restock'
+      };
+
+      // Update price statistics
+      this.updatePriceStatistics();
+      this.priceStatistics.priceChangeCount += 1;
+    }
+  }
+
+  if (newMinOrderQuantity !== undefined) {
+    this.minOrderQuantity = finalMinOrderQuantity;
+  }
+
+  if (costPrice !== undefined) {
+    this.costPrice = finalCostPrice;
+  }
+
+  // Update restock statistics
+  this.restockStatistics.totalRestocks += 1;
+  this.restockStatistics.totalQuantityAdded += (quantityToAdd || 0);
+  this.restockStatistics.totalInvestment += investment;
+  this.restockStatistics.lastRestockDate = new Date();
+  this.restockStatistics.averageRestockQuantity = 
+    this.restockStatistics.totalQuantityAdded / this.restockStatistics.totalRestocks;
+
+  // Add to stock history for consistency
+  this.stockHistory.push({
+    previousQuantity,
+    newQuantity,
+    changeAmount: quantityToAdd || 0,
+    changeType: 'restock',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: `Restock: ${reason}`,
+    note: note
+  });
+
+  // Update last stock change
+  this.lastStockChange = {
+    previousQuantity,
+    newQuantity,
+    changeAmount: quantityToAdd || 0,
+    changeType: 'restock',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: `Restock: ${reason}`
+  };
+
+  // Update stock statistics
+  this.stockStatistics.totalStockIn += (quantityToAdd || 0);
+  this.stockStatistics.stockChangeCount += 1;
+  this.stockStatistics.lastStockInDate = new Date();
+
+  // Check low stock
+  this.checkLowStock();
+  this.lastStockUpdate = new Date();
+
+  console.log(`📦 Restocked ${this.name}: ${previousQuantity} -> ${newQuantity} (added ${quantityToAdd}), Investment: UGX ${investment}`);
+
+  return {
+    previousQuantity,
+    newQuantity,
+    quantityAdded: quantityToAdd || 0,
+    previousPrice,
+    newPrice: finalPrice,
+    previousMinOrderQuantity,
+    newMinOrderQuantity: finalMinOrderQuantity,
+    previousCostPrice,
+    newCostPrice: finalCostPrice,
+    investment,
+    totalStockValue,
+    restockHistoryId: this.restockHistory[this.restockHistory.length - 1]._id
+  };
+};
+
+// Method to get restock analytics
+productSchema.methods.getRestockAnalytics = function(days = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  
+  const recentRestocks = this.restockHistory.filter(entry => 
+    new Date(entry.restockedAt) >= cutoffDate
+  );
+  
+  const totalQuantityAdded = recentRestocks.reduce((sum, entry) => 
+    sum + entry.quantityAdded, 0
+  );
+  
+  const totalInvestment = recentRestocks.reduce((sum, entry) => 
+    sum + entry.investment, 0
+  );
+
+  const priceChanges = recentRestocks.filter(entry => 
+    entry.newPrice !== entry.previousPrice
+  ).length;
+
+  const costPriceChanges = recentRestocks.filter(entry => 
+    entry.newCostPrice !== entry.previousCostPrice
+  ).length;
+
+  return {
+    period: `${days} days`,
+    totalRestocks: recentRestocks.length,
+    totalQuantityAdded,
+    totalInvestment,
+    averageRestockQuantity: recentRestocks.length > 0 ? 
+      totalQuantityAdded / recentRestocks.length : 0,
+    priceChanges,
+    costPriceChanges,
+    lastRestock: recentRestocks.length > 0 ? recentRestocks[0].restockedAt : null,
+    averageInvestment: recentRestocks.length > 0 ? 
+      totalInvestment / recentRestocks.length : 0
+  };
+};
+
+// Method to get restock history with pagination and filtering
+productSchema.methods.getRestockHistory = function(options = {}) {
+  const { page = 1, limit = 20, startDate, endDate } = options;
+  
+  let filteredHistory = [...this.restockHistory];
+
+  // Apply date filters
+  if (startDate) {
+    const start = new Date(startDate);
+    filteredHistory = filteredHistory.filter(entry => new Date(entry.restockedAt) >= start);
+  }
+
+  if (endDate) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    filteredHistory = filteredHistory.filter(entry => new Date(entry.restockedAt) <= end);
+  }
+
+  // Sort by date (newest first)
+  const sortedHistory = filteredHistory.sort((a, b) => 
+    new Date(b.restockedAt) - new Date(a.restockedAt)
+  );
+
+  // Paginate
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  const paginatedHistory = sortedHistory.slice(startIndex, endIndex);
+
+  return {
+    restockHistory: paginatedHistory,
+    totalEntries: sortedHistory.length,
+    totalPages: Math.ceil(sortedHistory.length / limit),
+    currentPage: parseInt(page)
   };
 };
 
@@ -782,6 +1117,14 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
           lowestPrice: sellingPrice,
           averagePrice: sellingPrice,
           priceChangeCount: 1
+        },
+        // Initialize restock statistics
+        restockStatistics: {
+          totalRestocks: 0,
+          totalQuantityAdded: 0,
+          totalInvestment: 0,
+          lastRestockDate: null,
+          averageRestockQuantity: 0
         }
       };
 
@@ -986,7 +1329,12 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
     certifiedProductsBySupplier: {},
     averageProfitMargin: 0,
     totalStockValue: 0,
-    totalPotentialRevenue: 0
+    totalPotentialRevenue: 0,
+    restockStats: {
+      totalRestocks: 0,
+      totalQuantityAdded: 0,
+      totalInvestment: 0
+    }
   };
 
   certifiedProducts.forEach(product => {
@@ -999,6 +1347,11 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
     analytics.totalPotentialRevenue += potentialRevenue;
     analytics.totalPotentialProfit += potentialProfit;
     analytics.totalStockValue += stockValue;
+
+    // Add restock statistics
+    analytics.restockStats.totalRestocks += product.restockStatistics.totalRestocks;
+    analytics.restockStats.totalQuantityAdded += product.restockStatistics.totalQuantityAdded;
+    analytics.restockStats.totalInvestment += product.restockStatistics.totalInvestment;
 
     if (product.lowStockAlert) {
       analytics.lowStockCertifiedProducts++;
@@ -1101,6 +1454,43 @@ productSchema.statics.getLowStockProducts = async function(wholesalerId, options
   };
 };
 
+// Static method to get products that need restocking (low stock)
+productSchema.statics.getProductsNeedingRestock = async function(wholesalerId, options = {}) {
+  const { page = 1, limit = 10 } = options;
+  
+  const products = await this.find({
+    wholesaler: wholesalerId,
+    isActive: true
+  });
+
+  // Filter products that are below their low stock threshold
+  const productsNeedingRestock = products.filter(product => {
+    if (!product.originalStockQuantity || product.originalStockQuantity === 0) return false;
+    
+    const threshold = product.originalStockQuantity * product.lowStockThreshold;
+    return product.quantity <= threshold;
+  });
+
+  // Sort by most critical (lowest stock percentage)
+  const sortedProducts = productsNeedingRestock.sort((a, b) => {
+    const aPercentage = a.quantity / a.originalStockQuantity;
+    const bPercentage = b.quantity / b.originalStockQuantity;
+    return aPercentage - bPercentage;
+  });
+
+  // Paginate
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  const paginatedProducts = sortedProducts.slice(startIndex, endIndex);
+
+  return {
+    productsNeedingRestock: paginatedProducts,
+    totalPages: Math.ceil(sortedProducts.length / limit),
+    currentPage: parseInt(page),
+    total: sortedProducts.length
+  };
+};
+
 // ==================== PRE-SAVE MIDDLEWARE ====================
 
 // Pre-save middleware
@@ -1123,6 +1513,17 @@ productSchema.pre('save', function(next) {
       totalStockIn: 0,
       totalStockOut: 0,
       stockChangeCount: 0
+    };
+  }
+
+  // Initialize restock statistics if not set
+  if (!this.restockStatistics) {
+    this.restockStatistics = {
+      totalRestocks: 0,
+      totalQuantityAdded: 0,
+      totalInvestment: 0,
+      lastRestockDate: null,
+      averageRestockQuantity: 0
     };
   }
   
@@ -1176,5 +1577,8 @@ productSchema.index({ 'certifiedOrderSource.orderId': 1 });
 productSchema.index({ 'certifiedOrderSource.supplierId': 1 });
 productSchema.index({ quantity: 1 }); // For low stock queries
 productSchema.index({ lastStockUpdate: -1 }); // For recent stock updates
+productSchema.index({ 'restockHistory.restockedAt': -1 }); // For restock history queries
+productSchema.index({ 'restockStatistics.lastRestockDate': -1 }); // For recent restocks
+productSchema.index({ 'restockStatistics.totalRestocks': -1 }); // For restock frequency
 
 module.exports = mongoose.model('Product', productSchema);

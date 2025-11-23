@@ -60,6 +60,46 @@ const priceHistorySchema = new mongoose.Schema({
   }
 });
 
+// Stock history schema for tracking stock changes
+const stockHistorySchema = new mongoose.Schema({
+  previousQuantity: {
+    type: Number,
+    required: true
+  },
+  newQuantity: {
+    type: Number,
+    required: true
+  },
+  changeAmount: {
+    type: Number,
+    required: true
+  },
+  changeType: {
+    type: String,
+    enum: ['stock_in', 'stock_out', 'manual_adjustment', 'order_certified', 'return_processed', 'initial_stock'],
+    required: true
+  },
+  changedAt: {
+    type: Date,
+    default: Date.now
+  },
+  changedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  reason: {
+    type: String,
+    default: 'Stock adjustment'
+  },
+  orderReference: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'RetailerOrder'
+  },
+  note: {
+    type: String
+  }
+});
+
 const productSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -134,7 +174,7 @@ const productSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
-  // Stock Management
+  // Enhanced Stock Management
   lowStockAlert: {
     type: Boolean,
     default: false
@@ -154,6 +194,29 @@ const productSchema = new mongoose.Schema({
     default: 0.5,
     min: 0.1,
     max: 0.9
+  },
+  // Stock History Tracking
+  stockHistory: [stockHistorySchema],
+  // Stock Statistics
+  stockStatistics: {
+    totalStockIn: {
+      type: Number,
+      default: 0
+    },
+    totalStockOut: {
+      type: Number,
+      default: 0
+    },
+    stockChangeCount: {
+      type: Number,
+      default: 0
+    },
+    lastStockInDate: {
+      type: Date
+    },
+    lastStockOutDate: {
+      type: Date
+    }
   },
   // Certified Products
   fromCertifiedOrder: {
@@ -196,6 +259,23 @@ const productSchema = new mongoose.Schema({
     reason: String,
     changeType: String
   },
+  // Last stock change information
+  lastStockChange: {
+    previousQuantity: Number,
+    newQuantity: Number,
+    changeAmount: Number,
+    changeType: String,
+    changedAt: Date,
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    reason: String,
+    orderReference: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'RetailerOrder'
+    }
+  },
   // Price statistics
   priceStatistics: {
     highestPrice: Number,
@@ -234,6 +314,22 @@ productSchema.virtual('totalProfitPotential').get(function() {
   return 0;
 });
 
+// Virtual for current stock value
+productSchema.virtual('stockValue').get(function() {
+  if (this.costPrice && this.quantity) {
+    return (this.costPrice * this.quantity).toFixed(2);
+  }
+  return 0;
+});
+
+// Virtual for potential revenue
+productSchema.virtual('potentialRevenue').get(function() {
+  if (this.price && this.quantity) {
+    return (this.price * this.quantity).toFixed(2);
+  }
+  return 0;
+});
+
 // Generate SKU before saving
 productSchema.pre('save', async function(next) {
   if (this.isNew && !this.sku) {
@@ -242,6 +338,8 @@ productSchema.pre('save', async function(next) {
   }
   next();
 });
+
+// ==================== STOCK MANAGEMENT METHODS ====================
 
 // Method to check low stock
 productSchema.methods.checkLowStock = function() {
@@ -256,6 +354,202 @@ productSchema.methods.checkLowStock = function() {
   }
   return this.lowStockAlert;
 };
+
+// Method to reduce stock with comprehensive tracking
+productSchema.methods.reduceStock = function(quantity, userId, reason = 'Stock reduction', orderReference = null, note = '') {
+  if (this.quantity < quantity) {
+    throw new Error(`Insufficient stock. Available: ${this.quantity}, Requested: ${quantity}`);
+  }
+  
+  const previousQuantity = this.quantity;
+  const newQuantity = previousQuantity - quantity;
+  
+  // Add to stock history
+  this.stockHistory.push({
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: -quantity,
+    changeType: 'stock_out',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    orderReference: orderReference,
+    note: note
+  });
+  
+  // Update last stock change
+  this.lastStockChange = {
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: -quantity,
+    changeType: 'stock_out',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    orderReference: orderReference
+  };
+  
+  // Update current quantity
+  this.quantity = newQuantity;
+  
+  // Update stock statistics
+  this.stockStatistics.totalStockOut += quantity;
+  this.stockStatistics.stockChangeCount += 1;
+  this.stockStatistics.lastStockOutDate = new Date();
+  
+  // Check low stock
+  this.checkLowStock();
+  this.lastStockUpdate = new Date();
+  
+  console.log(`📦 Stock reduced for ${this.name}: ${previousQuantity} -> ${newQuantity} (reduced by ${quantity})`);
+  
+  return {
+    previousQuantity,
+    newQuantity,
+    changeAmount: -quantity,
+    stockHistoryId: this.stockHistory[this.stockHistory.length - 1]._id
+  };
+};
+
+// Method to restore stock with comprehensive tracking
+productSchema.methods.restoreStock = function(quantity, userId, reason = 'Stock restoration', orderReference = null, note = '') {
+  const previousQuantity = this.quantity;
+  const newQuantity = previousQuantity + quantity;
+  
+  // Add to stock history
+  this.stockHistory.push({
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: quantity,
+    changeType: 'stock_in',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    orderReference: orderReference,
+    note: note
+  });
+  
+  // Update last stock change
+  this.lastStockChange = {
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: quantity,
+    changeType: 'stock_in',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    orderReference: orderReference
+  };
+  
+  // Update current quantity
+  this.quantity = newQuantity;
+  
+  // Update stock statistics
+  this.stockStatistics.totalStockIn += quantity;
+  this.stockStatistics.stockChangeCount += 1;
+  this.stockStatistics.lastStockInDate = new Date();
+  
+  // Check low stock
+  this.checkLowStock();
+  this.lastStockUpdate = new Date();
+  
+  console.log(`📦 Stock restored for ${this.name}: ${previousQuantity} -> ${newQuantity} (restored by ${quantity})`);
+  
+  return {
+    previousQuantity,
+    newQuantity,
+    changeAmount: quantity,
+    stockHistoryId: this.stockHistory[this.stockHistory.length - 1]._id
+  };
+};
+
+// Method to manually adjust stock
+productSchema.methods.adjustStock = function(newQuantity, userId, reason = 'Manual adjustment', note = '') {
+  const previousQuantity = this.quantity;
+  const changeAmount = newQuantity - previousQuantity;
+  const changeType = changeAmount > 0 ? 'stock_in' : 'stock_out';
+  
+  // Add to stock history
+  this.stockHistory.push({
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: changeAmount,
+    changeType: 'manual_adjustment',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason,
+    note: note
+  });
+  
+  // Update last stock change
+  this.lastStockChange = {
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity,
+    changeAmount: changeAmount,
+    changeType: 'manual_adjustment',
+    changedAt: new Date(),
+    changedBy: userId,
+    reason: reason
+  };
+  
+  // Update current quantity
+  this.quantity = newQuantity;
+  
+  // Update stock statistics
+  if (changeAmount > 0) {
+    this.stockStatistics.totalStockIn += changeAmount;
+    this.stockStatistics.lastStockInDate = new Date();
+  } else {
+    this.stockStatistics.totalStockOut += Math.abs(changeAmount);
+    this.stockStatistics.lastStockOutDate = new Date();
+  }
+  this.stockStatistics.stockChangeCount += 1;
+  
+  // Check low stock
+  this.checkLowStock();
+  this.lastStockUpdate = new Date();
+  
+  console.log(`📦 Stock adjusted for ${this.name}: ${previousQuantity} -> ${newQuantity} (${changeAmount > 0 ? 'increased' : 'decreased'} by ${Math.abs(changeAmount)})`);
+  
+  return {
+    previousQuantity,
+    newQuantity,
+    changeAmount,
+    stockHistoryId: this.stockHistory[this.stockHistory.length - 1]._id
+  };
+};
+
+// Method to get stock analytics
+productSchema.methods.getStockAnalytics = function(days = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  
+  const recentHistory = this.stockHistory.filter(entry => 
+    new Date(entry.changedAt) >= cutoffDate
+  );
+  
+  const stockOut = recentHistory.filter(entry => entry.changeType === 'stock_out');
+  const stockIn = recentHistory.filter(entry => entry.changeType === 'stock_in');
+  
+  const totalStockOut = stockOut.reduce((sum, entry) => sum + Math.abs(entry.changeAmount), 0);
+  const totalStockIn = stockIn.reduce((sum, entry) => sum + entry.changeAmount, 0);
+  
+  return {
+    period: `${days} days`,
+    totalStockChanges: recentHistory.length,
+    totalStockOut: totalStockOut,
+    totalStockIn: totalStockIn,
+    netStockChange: totalStockIn - totalStockOut,
+    averageDailyChange: recentHistory.length > 0 ? 
+      (totalStockIn - totalStockOut) / days : 0,
+    stockOutCount: stockOut.length,
+    stockInCount: stockIn.length,
+    lowStockAlert: this.lowStockAlert,
+    currentStock: this.quantity
+  };
+};
+
+// ==================== PRICE MANAGEMENT METHODS ====================
 
 // Enhanced method to update price with comprehensive history tracking
 productSchema.methods.updatePrice = function(newPrice, userId, reason = 'Price adjustment', saleReference = null, changeType = 'manual', note = '') {
@@ -410,7 +704,13 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
       if (existingProduct) {
         console.log(`Certified product already exists: ${certifiedSku}`);
         // Update quantity if product already exists
-        existingProduct.quantity += orderItem.quantity;
+        const stockUpdate = existingProduct.restoreStock(
+          orderItem.quantity,
+          wholesalerId,
+          'Stock addition from certified order',
+          order._id,
+          `Additional stock from certified order ${order.orderNumber}`
+        );
         await existingProduct.save();
         products.push(existingProduct);
         continue;
@@ -450,6 +750,24 @@ productSchema.statics.createFromCertifiedOrder = async function(order, wholesale
           orderId: order._id,
           supplierId: supplierProduct.supplier?._id,
           certifiedAt: new Date()
+        },
+        // Initialize stock history
+        stockHistory: [{
+          previousQuantity: 0,
+          newQuantity: orderItem.quantity,
+          changeAmount: orderItem.quantity,
+          changeType: 'initial_stock',
+          changedAt: new Date(),
+          changedBy: wholesalerId,
+          reason: 'Initial stock from certified order',
+          orderReference: order._id,
+          note: `Initial stock from certified order ${order.orderNumber}`
+        }],
+        stockStatistics: {
+          totalStockIn: orderItem.quantity,
+          totalStockOut: 0,
+          stockChangeCount: 1,
+          lastStockInDate: new Date()
         },
         priceHistory: [{
           sellingPrice: sellingPrice,
@@ -517,17 +835,20 @@ productSchema.statics.updateStockFromCertifiedOrder = async function(orderId, wh
       });
 
       if (product) {
-        // Update quantity - add the ordered quantity
-        const oldQuantity = product.quantity;
-        product.quantity += orderItem.quantity;
+        // Update quantity using restoreStock method for proper tracking
+        const stockUpdate = product.restoreStock(
+          orderItem.quantity,
+          wholesalerId,
+          'Stock addition from certified order update',
+          order._id,
+          `Additional stock from certified order update ${order.orderNumber}`
+        );
         await product.save();
         updatedProducts.push({
           product: product,
-          oldQuantity: oldQuantity,
-          newQuantity: product.quantity,
-          added: orderItem.quantity
+          stockUpdate: stockUpdate
         });
-        console.log(`Updated stock for ${product.name}: ${oldQuantity} -> ${product.quantity}`);
+        console.log(`Updated stock for ${product.name}: ${stockUpdate.previousQuantity} -> ${stockUpdate.newQuantity}`);
       } else {
         console.log(`Certified product not found: ${certifiedSku}`);
       }
@@ -663,17 +984,21 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
     lowStockCertifiedProducts: 0,
     outOfStockCertifiedProducts: 0,
     certifiedProductsBySupplier: {},
-    averageProfitMargin: 0
+    averageProfitMargin: 0,
+    totalStockValue: 0,
+    totalPotentialRevenue: 0
   };
 
   certifiedProducts.forEach(product => {
     const investment = product.costPrice * product.quantity;
     const potentialRevenue = product.price * product.quantity;
     const potentialProfit = potentialRevenue - investment;
+    const stockValue = product.costPrice * product.quantity;
 
     analytics.totalInvestment += investment;
     analytics.totalPotentialRevenue += potentialRevenue;
     analytics.totalPotentialProfit += potentialProfit;
+    analytics.totalStockValue += stockValue;
 
     if (product.lowStockAlert) {
       analytics.lowStockCertifiedProducts++;
@@ -688,10 +1013,14 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
     if (!analytics.certifiedProductsBySupplier[supplierId]) {
       analytics.certifiedProductsBySupplier[supplierId] = {
         count: 0,
-        supplierName: product.certifiedOrderSource?.supplierId?.businessName || 'Unknown Supplier'
+        supplierName: product.certifiedOrderSource?.supplierId?.businessName || 'Unknown Supplier',
+        totalInvestment: 0,
+        totalStockValue: 0
       };
     }
     analytics.certifiedProductsBySupplier[supplierId].count++;
+    analytics.certifiedProductsBySupplier[supplierId].totalInvestment += investment;
+    analytics.certifiedProductsBySupplier[supplierId].totalStockValue += stockValue;
   });
 
   if (certifiedProducts.length > 0) {
@@ -702,7 +1031,77 @@ productSchema.statics.getCertifiedProductAnalytics = async function(wholesalerId
   return analytics;
 };
 
-// ==================== END CERTIFIED ORDER METHODS ====================
+// ==================== STOCK HISTORY METHODS ====================
+
+// Method to get stock history with pagination and filtering
+productSchema.methods.getStockHistory = function(options = {}) {
+  const { page = 1, limit = 20, changeType, startDate, endDate } = options;
+  
+  let filteredHistory = [...this.stockHistory];
+
+  // Apply filters
+  if (changeType) {
+    filteredHistory = filteredHistory.filter(entry => entry.changeType === changeType);
+  }
+
+  if (startDate) {
+    const start = new Date(startDate);
+    filteredHistory = filteredHistory.filter(entry => new Date(entry.changedAt) >= start);
+  }
+
+  if (endDate) {
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    filteredHistory = filteredHistory.filter(entry => new Date(entry.changedAt) <= end);
+  }
+
+  // Sort by date (newest first)
+  const sortedHistory = filteredHistory.sort((a, b) => 
+    new Date(b.changedAt) - new Date(a.changedAt)
+  );
+
+  // Paginate
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  const paginatedHistory = sortedHistory.slice(startIndex, endIndex);
+
+  return {
+    stockHistory: paginatedHistory,
+    totalEntries: sortedHistory.length,
+    totalPages: Math.ceil(sortedHistory.length / limit),
+    currentPage: parseInt(page)
+  };
+};
+
+// Static method to get low stock products for a wholesaler
+productSchema.statics.getLowStockProducts = async function(wholesalerId, options = {}) {
+  const { page = 1, limit = 10 } = options;
+  
+  const lowStockProducts = await this.find({
+    wholesaler: wholesalerId,
+    lowStockAlert: true,
+    isActive: true
+  })
+  .populate('certifiedOrderSource.supplierId', 'businessName')
+  .sort({ lowStockAlertAt: -1 })
+  .limit(limit * 1)
+  .skip((page - 1) * limit);
+
+  const total = await this.countDocuments({
+    wholesaler: wholesalerId,
+    lowStockAlert: true,
+    isActive: true
+  });
+
+  return {
+    lowStockProducts,
+    totalPages: Math.ceil(total / limit),
+    currentPage: parseInt(page),
+    total
+  };
+};
+
+// ==================== PRE-SAVE MIDDLEWARE ====================
 
 // Pre-save middleware
 productSchema.pre('save', function(next) {
@@ -715,6 +1114,15 @@ productSchema.pre('save', function(next) {
   if (!this.priceStatistics) {
     this.priceStatistics = {
       priceChangeCount: 0
+    };
+  }
+  
+  // Initialize stock statistics if not set
+  if (!this.stockStatistics) {
+    this.stockStatistics = {
+      totalStockIn: 0,
+      totalStockOut: 0,
+      stockChangeCount: 0
     };
   }
   
@@ -749,6 +1157,8 @@ productSchema.pre('save', function(next) {
 // Ensure virtual fields are included when converting to JSON
 productSchema.set('toJSON', { virtuals: true });
 
+// ==================== INDEXES ====================
+
 // Indexes for better query performance
 productSchema.index({ wholesaler: 1, category: 1 });
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
@@ -759,7 +1169,12 @@ productSchema.index({ wholesaler: 1, fromCertifiedOrder: 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ 'priceHistory.changedAt': -1 });
 productSchema.index({ 'priceStatistics.priceChangeCount': -1 });
+productSchema.index({ 'stockHistory.changedAt': -1 });
+productSchema.index({ 'stockStatistics.lastStockOutDate': -1 });
+productSchema.index({ 'stockStatistics.lastStockInDate': -1 });
 productSchema.index({ 'certifiedOrderSource.orderId': 1 });
 productSchema.index({ 'certifiedOrderSource.supplierId': 1 });
+productSchema.index({ quantity: 1 }); // For low stock queries
+productSchema.index({ lastStockUpdate: -1 }); // For recent stock updates
 
 module.exports = mongoose.model('Product', productSchema);

@@ -1,6 +1,7 @@
 const RetailerOrder = require('../models/RetailerOrder');
 const Product = require('../models/Product');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { addSystemStockFromOrder } = require('./systemStockController');
 
 // Create a new order
@@ -88,6 +89,72 @@ exports.createOrder = async (req, res) => {
     // Save the order
     await order.save();
 
+    // Create notification for wholesaler about new order
+    const retailerName = req.user.businessName || `${req.user.firstName} ${req.user.lastName}`;
+    const notification = new Notification({
+      user: productDetails.wholesaler._id,
+      type: 'new_order',
+      title: 'New Order Received',
+      message: `You have received a new order for ${quantity} ${productDetails.measurementUnit} of ${productDetails.name} from ${retailerName}`,
+      data: {
+        orderId: order._id,
+        productName: productDetails.name,
+        quantity: quantity,
+        retailerName: retailerName,
+        totalPrice: order.totalPrice,
+        status: 'pending',
+        measurementUnit: productDetails.measurementUnit
+      },
+      priority: 'high'
+    });
+
+    await notification.save();
+
+    // Emit real-time notification via Socket.io if available
+    if (req.app.get('socketio')) {
+      const io = req.app.get('socketio');
+      
+      // Emit to wholesaler's personal room
+      io.to(productDetails.wholesaler._id.toString()).emit('new_notification', {
+        notification: {
+          _id: notification._id,
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          data: notification.data,
+          read: notification.read,
+          createdAt: notification.createdAt
+        }
+      });
+      
+      // Emit specific new_order event
+      io.to(productDetails.wholesaler._id.toString()).emit('new_order', {
+        order: {
+          _id: order._id,
+          product: {
+            name: productDetails.name,
+            images: productDetails.images
+          },
+          retailer: {
+            firstName: req.user.firstName,
+            lastName: req.user.lastName,
+            businessName: req.user.businessName
+          },
+          quantity: order.quantity,
+          measurementUnit: order.measurementUnit,
+          totalPrice: order.totalPrice,
+          status: order.status
+        },
+        notification: {
+          _id: notification._id,
+          title: notification.title,
+          message: notification.message
+        }
+      });
+
+      console.log(`📢 Real-time notification sent to wholesaler: ${productDetails.wholesaler._id}`);
+    }
+
     // Populate the order with necessary details
     await order.populate([
       { path: 'product', select: 'name description images' },
@@ -98,7 +165,11 @@ exports.createOrder = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Order placed successfully',
-      order
+      order,
+      notification: {
+        id: notification._id,
+        message: `Wholesaler has been notified about the new order`
+      }
     });
 
   } catch (error) {
@@ -456,6 +527,21 @@ exports.updateOrderStatus = async (req, res) => {
         console.error('Error adding system stock:', stockError);
         // Continue with order update even if system stock update fails
       }
+
+      // Create notification for retailer about order certification
+      await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Order Certified',
+        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been certified and completed successfully.`,
+        data: {
+          orderId: order._id,
+          status: 'certified',
+          productName: order.product?.name,
+          quantity: order.quantity
+        },
+        priority: 'medium'
+      });
     }
 
     // Handle delivery dispute by retailer
@@ -466,6 +552,21 @@ exports.updateOrderStatus = async (req, res) => {
         reason: disputeReason,
         resolved: false
       };
+
+      // Create notification for wholesaler about dispute
+      await Notification.create({
+        user: order.wholesaler,
+        type: 'order_disputed',
+        title: 'Order Disputed',
+        message: `Order #${order._id.toString().slice(-8)} has been disputed by the retailer. Reason: ${disputeReason}`,
+        data: {
+          orderId: order._id,
+          status: 'disputed',
+          disputeReason: disputeReason,
+          retailerName: order.retailer?.businessName || `${order.retailer?.firstName} ${order.retailer?.lastName}`
+        },
+        priority: 'high'
+      });
     }
 
     // Handle return to wholesaler by transporter
@@ -477,6 +578,21 @@ exports.updateOrderStatus = async (req, res) => {
       };
       order.returnRequestedAt = new Date();
       order.returnReason = returnReason;
+
+      // Create notification for wholesaler about return request
+      await Notification.create({
+        user: order.wholesaler,
+        type: 'order_return',
+        title: 'Return Request',
+        message: `Transporter has requested to return order #${order._id.toString().slice(-8)}. Reason: ${returnReason}`,
+        data: {
+          orderId: order._id,
+          status: 'return_to_wholesaler',
+          returnReason: returnReason,
+          transporterName: order.transporter?.businessName || `${order.transporter?.firstName} ${order.transporter?.lastName}`
+        },
+        priority: 'high'
+      });
     }
 
     // Handle return acceptance by wholesaler - RESTORE STOCK HERE
@@ -492,11 +608,38 @@ exports.updateOrderStatus = async (req, res) => {
         console.error('Error restoring product stock:', stockError);
         // Continue with return processing even if stock update fails
       }
+
+      // Create notification for retailer about return acceptance
+      await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Accepted',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been accepted and payment has been refunded.`,
+        data: {
+          orderId: order._id,
+          status: 'return_accepted',
+          refundAmount: order.totalPrice
+        },
+        priority: 'medium'
+      });
     }
 
     // Handle return rejection by wholesaler
     if (status === 'return_rejected') {
       order.returnDetails.returnRejectedAt = new Date();
+
+      // Create notification for retailer about return rejection
+      await Notification.create({
+        user: order.retailer,
+        type: 'order_status_update',
+        title: 'Return Rejected',
+        message: `Your return request for order #${order._id.toString().slice(-8)} has been rejected.`,
+        data: {
+          orderId: order._id,
+          status: 'return_rejected'
+        },
+        priority: 'medium'
+      });
     }
 
     // Handle reassignment by wholesaler
@@ -525,12 +668,81 @@ exports.updateOrderStatus = async (req, res) => {
           assignmentType || 'specific',
           'assigned'
         );
+
+        // Create notification for assigned transporter
+        if (transporterId) {
+          await Notification.create({
+            user: transporterId,
+            type: 'order_assigned',
+            title: 'New Order Assigned',
+            message: `You have been assigned a new order for delivery. Order #${order._id.toString().slice(-8)}`,
+            data: {
+              orderId: order._id,
+              status: 'assigned_to_transporter',
+              productName: order.product?.name,
+              quantity: order.quantity,
+              deliveryPlace: order.deliveryPlace
+            },
+            priority: 'high'
+          });
+        }
       }
     }
     
     // Set actual delivery date if status is delivered
     if (status === 'delivered') {
       order.actualDeliveryDate = new Date();
+
+      // Create notification for retailer about delivery
+      await Notification.create({
+        user: order.retailer,
+        type: 'order_delivered',
+        title: 'Order Delivered',
+        message: `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been delivered. Please certify the delivery.`,
+        data: {
+          orderId: order._id,
+          status: 'delivered',
+          productName: order.product?.name,
+          quantity: order.quantity
+        },
+        priority: 'medium'
+      });
+    }
+
+    // Create general status update notifications
+    if (['accepted', 'processing', 'in_transit'].includes(status)) {
+      let notificationMessage = '';
+      let notificationTitle = '';
+
+      switch (status) {
+        case 'accepted':
+          notificationTitle = 'Order Accepted';
+          notificationMessage = `Your order for ${order.quantity} ${order.measurementUnit} of ${order.product?.name} has been accepted by the wholesaler.`;
+          break;
+        case 'processing':
+          notificationTitle = 'Order Processing';
+          notificationMessage = `Your order is now being processed by the wholesaler.`;
+          break;
+        case 'in_transit':
+          notificationTitle = 'Order In Transit';
+          notificationMessage = `Your order is now in transit and on its way to you.`;
+          break;
+      }
+
+      if (notificationMessage) {
+        await Notification.create({
+          user: order.retailer,
+          type: 'order_status_update',
+          title: notificationTitle,
+          message: notificationMessage,
+          data: {
+            orderId: order._id,
+            status: status,
+            productName: order.product?.name
+          },
+          priority: 'medium'
+        });
+      }
     }
 
     await order.save();
@@ -603,6 +815,20 @@ exports.resolveDispute = async (req, res) => {
     }
 
     await order.save();
+
+    // Create notification for retailer about dispute resolution
+    await Notification.create({
+      user: order.retailer,
+      type: 'order_status_update',
+      title: 'Dispute Resolved',
+      message: `The dispute for order #${order._id.toString().slice(-8)} has been resolved. ${resolutionNotes}`,
+      data: {
+        orderId: order._id,
+        status: reassign ? 'assigned_to_transporter' : 'disputed_resolved',
+        resolutionNotes: resolutionNotes
+      },
+      priority: 'medium'
+    });
 
     await order.populate([
       { path: 'product', select: 'name description images' },
@@ -790,6 +1016,29 @@ exports.getOrderStatistics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while fetching statistics',
+      error: error.message
+    });
+  }
+};
+
+// Get pending orders count for notifications
+exports.getPendingOrdersCount = async (req, res) => {
+  try {
+    const count = await RetailerOrder.countDocuments({
+      wholesaler: req.user.id,
+      status: 'pending'
+    });
+
+    res.status(200).json({
+      success: true,
+      pendingOrdersCount: count
+    });
+
+  } catch (error) {
+    console.error('Get pending orders count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching pending orders count',
       error: error.message
     });
   }

@@ -18,6 +18,7 @@ const User = require('./models/User');
 const Conversation = require('./models/Conversation');
 const Message = require('./models/Message');
 const RetailerOrder = require('./models/RetailerOrder');
+const Notification = require('./models/Notification'); // NEW: Notification model
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -46,13 +47,23 @@ const certifiedStockRoutes = require('./routes/certifiedStock');
 const authControllerRoutes = require('./routes/authController');
 const todoRoutes = require('./routes/todo');
 
+// NEW: Notification routes
+let notificationRoutes;
+try {
+  notificationRoutes = require('./routes/notifications');
+  console.log('✅ Notification routes loaded successfully');
+} catch (error) {
+  console.log('⚠️ Notification routes not available yet, using empty router');
+  notificationRoutes = express.Router();
+}
+
 // SAFE IMPORT FOR RETAILER ORDERS (prevents crash if file doesn't exist)
 let retailerOrderRoutes;
 try {
   retailerOrderRoutes = require('./routes/retailerOrders');
-  console.log('Retailer orders routes loaded successfully');
+  console.log('✅ Retailer orders routes loaded successfully');
 } catch (error) {
-  console.log('Retailer orders route not available yet, using empty router');
+  console.log('⚠️ Retailer orders route not available yet, using empty router');
   retailerOrderRoutes = express.Router();
 }
 
@@ -126,6 +137,9 @@ const connectDB = async () => {
 const app = express();
 const server = http.createServer(app);
 
+// Store socket.io instance in app for use in controllers
+app.set('socketio', null); // Will be set after socket initialization
+
 // Enhanced CORS configuration for production - EXPANDED FOR ALL PLATFORMS
 const allowedOrigins = [
   'http://localhost:3000',
@@ -151,6 +165,9 @@ const io = socketIo(server, {
     transports: ['websocket', 'polling']
   }
 });
+
+// Set socket.io instance in app for use in controllers
+app.set('socketio', io);
 
 const PORT = process.env.PORT || 5000;
 
@@ -226,6 +243,9 @@ app.use('/api/certified-orders', certifiedOrdersRoutes);
 app.use('/api/certified-stock', certifiedStockRoutes);
 app.use('/api/user', userSettingsRoutes);
 
+// NEW: Notification routes
+app.use('/api/notifications', notificationRoutes);
+
 // NEW: TODO and Reminder routes
 app.use('/api/todo', todoRoutes);
 
@@ -247,8 +267,152 @@ app.get('/api/react-native-test', (req, res) => {
     serverTime: new Date().toISOString(),
     clientInfo: clientInfo,
     environment: process.env.NODE_ENV,
-    socketUrl: process.env.SOCKET_SERVER_URL || `https://mytrade-cx5z.onrender.com`
+    socketUrl: process.env.SOCKET_SERVER_URL || `https://mytrade-cx5z.onrender.com`,
+    features: {
+      realTimeChat: true,
+      notifications: true,
+      todoSystem: true,
+      reminderSystem: true
+    }
   });
+});
+
+// NEW: Notification system test endpoint
+app.get('/api/test-notifications', async (req, res) => {
+  try {
+    const notificationStats = {
+      system: 'Real-time Notification System',
+      status: 'active',
+      features: [
+        'Real-time order notifications',
+        'Desktop notifications (Electron)',
+        'Mobile push notifications',
+        'Order status updates',
+        'Wholesaler order alerts',
+        'Socket.IO integration',
+        'Notification bell with unread count'
+      ],
+      notificationTypes: [
+        'new_order',
+        'order_status_update',
+        'order_assigned',
+        'order_delivered',
+        'order_disputed',
+        'order_return',
+        'system_alert',
+        'chat_message'
+      ],
+      endpoints: {
+        getAll: 'GET /api/notifications',
+        markRead: 'PUT /api/notifications/:id/read',
+        markAllRead: 'PUT /api/notifications/read-all',
+        delete: 'DELETE /api/notifications/:id',
+        unreadCount: 'GET /api/notifications/unread/count'
+      },
+      realTimeEvents: {
+        new_order: 'Emitted when wholesaler receives new order',
+        new_notification: 'Emitted for all new notifications',
+        order_status_update: 'Emitted when order status changes'
+      }
+    };
+
+    // Check if Notification model is available
+    let notificationCount = 0;
+    try {
+      notificationCount = await Notification.countDocuments();
+    } catch (error) {
+      console.log('Notification collection not available yet');
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification system is active and running',
+      stats: {
+        totalNotifications: notificationCount,
+        systemStatus: 'operational'
+      },
+      ...notificationStats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Notification system test failed',
+      error: error.message
+    });
+  }
+});
+
+// NEW: Create test notification endpoint
+app.post('/api/test-notification', async (req, res) => {
+  try {
+    const { userId, type, title, message, data } = req.body;
+
+    if (!userId || !type || !title || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId, type, title, and message are required'
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const notification = new Notification({
+      user: userId,
+      type: type || 'system_alert',
+      title: title || 'Test Notification',
+      message: message || 'This is a test notification from the API',
+      data: data || { test: true, timestamp: new Date().toISOString() },
+      priority: 'medium'
+    });
+
+    await notification.save();
+
+    // Emit real-time notification via Socket.io
+    if (app.get('socketio')) {
+      const io = app.get('socketio');
+      io.to(userId.toString()).emit('new_notification', {
+        notification: {
+          _id: notification._id,
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          data: notification.data,
+          read: notification.read,
+          createdAt: notification.createdAt
+        }
+      });
+
+      console.log(`📢 Test notification sent to user: ${userId}`);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Test notification created and sent successfully',
+      notification: {
+        id: notification._id,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        sentTo: user.businessName || `${user.firstName} ${user.lastName}`,
+        realTime: app.get('socketio') ? 'delivered' : 'not delivered'
+      }
+    });
+
+  } catch (error) {
+    console.error('Test notification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create test notification',
+      error: error.message
+    });
+  }
 });
 
 // NEW: Environment variables check (safe - no sensitive data)
@@ -294,13 +458,15 @@ app.get('/api/mobile-diagnostics', async (req, res) => {
         cloudinary: process.env.CLOUDINARY_URL ? 'available' : 'unavailable',
         socket: 'available',
         todoSystem: 'available',
-        reminderSystem: 'available'
+        reminderSystem: 'available',
+        notificationSystem: 'available'
       },
       endpoints: {
         auth: '/api/auth',
         users: '/api/users',
         conversations: '/api/conversations',
         messages: '/api/messages',
+        notifications: '/api/notifications',
         todo: '/api/todo',
         health: '/api/health'
       }
@@ -337,7 +503,7 @@ app.get('/api/socket-test', (req, res) => {
     message: 'Socket.IO server is running',
     socketUrl: `https://mytrade-cx5z.onrender.com`,
     supportedTransports: ['websocket', 'polling'],
-    features: ['real-time messaging', 'typing indicators', 'online status', 'file sharing']
+    features: ['real-time messaging', 'typing indicators', 'online status', 'file sharing', 'real-time notifications']
   });
 });
 
@@ -404,6 +570,7 @@ app.get('/api/health', async (req, res) => {
     let cloudinaryStatus = process.env.CLOUDINARY_URL ? 'configured' : 'not configured';
     let todoSystemStatus = 'available';
     let reminderSystemStatus = 'available';
+    let notificationSystemStatus = 'available';
     
     // Check database connection
     if (mongoose.connection.readyState === 1) {
@@ -442,6 +609,19 @@ app.get('/api/health', async (req, res) => {
       }
     }
     
+    // Test notification system
+    let notificationTest = { success: false, message: 'Not connected' };
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const notificationsCount = await Notification.countDocuments();
+        notificationTest = { success: true, message: 'Operational', notificationsCount };
+        notificationSystemStatus = 'available';
+      } catch (notificationError) {
+        notificationTest = { success: false, message: notificationError.message };
+        notificationSystemStatus = 'error: ' + notificationError.message;
+      }
+    }
+    
     // Test reminder service
     try {
       const reminderStatus = reminderService.getServiceStatus ? reminderService.getServiceStatus() : { status: 'unknown' };
@@ -467,9 +647,11 @@ app.get('/api/health', async (req, res) => {
       },
       database: databaseInfo,
       databaseTest: dbTest,
+      notificationTest: notificationTest,
       cloudinary: cloudinaryStatus,
       todoSystem: todoSystemStatus,
       reminderSystem: reminderSystemStatus,
+      notificationSystem: notificationSystemStatus,
       memory: {
         used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
         total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
@@ -488,6 +670,7 @@ app.get('/api/health', async (req, res) => {
         multiPlatform: true,
         todoManagement: true,
         reminderSystem: reminderSystemStatus === 'available',
+        notificationSystem: notificationSystemStatus === 'available',
         whatsappNotifications: process.env.CALLMEBOT_API_KEY ? true : false
       },
       routes: [
@@ -500,6 +683,7 @@ app.get('/api/health', async (req, res) => {
         '/api/products',
         '/api/retailer-orders',
         '/api/transporters',
+        '/api/notifications',
         '/api/todo',
         '/api/health',
         '/api/test-db',
@@ -507,7 +691,8 @@ app.get('/api/health', async (req, res) => {
         '/api/react-native-test',
         '/api/mobile-diagnostics',
         '/api/socket-test',
-        '/api/test-todo-system'
+        '/api/test-todo-system',
+        '/api/test-notifications'
       ]
     });
   } catch (error) {
@@ -543,6 +728,14 @@ app.get('/api/test-mongodb', async (req, res) => {
       const collections = await mongoose.connection.db.listCollections().toArray();
       const collectionNames = collections.map(c => c.name);
       
+      // Check notification collection
+      let notificationsCount = 0;
+      try {
+        notificationsCount = await Notification.countDocuments();
+      } catch (error) {
+        console.log('Notification collection not available yet');
+      }
+      
       res.json({
         success: true,
         message: 'MongoDB is connected and operational',
@@ -552,9 +745,11 @@ app.get('/api/test-mongodb', async (req, res) => {
         host: mongoose.connection.host,
         collections: collectionNames,
         usersCount: usersCount,
+        notificationsCount: notificationsCount,
         performance: {
           collectionCount: collections.length,
-          userCount: usersCount
+          userCount: usersCount,
+          notificationCount: notificationsCount
         }
       });
     } else {
@@ -607,6 +802,14 @@ app.get('/api/test-db', async (req, res) => {
       console.log('RetailerOrder collection not available yet');
     }
 
+    // Test Notification collection
+    let notificationsCount = 0;
+    try {
+      notificationsCount = await Notification.countDocuments();
+    } catch (notificationError) {
+      console.log('Notification collection not available yet');
+    }
+
     // Test TODO collection if it exists
     let todosCount = 0;
     try {
@@ -626,10 +829,11 @@ app.get('/api/test-db', async (req, res) => {
         conversations: conversationsCount,
         messages: messagesCount,
         orders: ordersCount,
+        notifications: notificationsCount,
         todos: todosCount
       },
       performance: {
-        totalRecords: usersCount + conversationsCount + messagesCount + ordersCount + todosCount
+        totalRecords: usersCount + conversationsCount + messagesCount + ordersCount + notificationsCount + todosCount
       }
     });
   } catch (error) {
@@ -1089,6 +1293,7 @@ app.use('*', (req, res) => {
       '/api/products/*',
       '/api/retailer-orders/*',
       '/api/transporters/*',
+      '/api/notifications/*',
       '/api/todo/*',
       '/api/health',
       '/api/test-db',
@@ -1102,6 +1307,7 @@ app.use('*', (req, res) => {
       '/api/test-password-reset',
       '/api/test-todo',
       '/api/test-todo-system',
+      '/api/test-notifications',
       '/api/react-native-test',
       '/api/mobile-diagnostics',
       '/api/socket-test',
@@ -1203,6 +1409,7 @@ const startServer = async () => {
     console.log(`☁️  Cloudinary configured for file uploads`);
     console.log(`🌍 CORS enabled for ${allowedOrigins.length} origins`);
     console.log(`📱 React Native support: Enabled`);
+    console.log(`🔔 Notification system: Enabled`);
     
     if (isConnected) {
       console.log(`🗄️  MongoDB connected: ${mongoose.connection.name}`);
@@ -1221,12 +1428,14 @@ const startServer = async () => {
     console.log(`   - Products: /api/products`);
     console.log(`   - Retailer Orders: /api/retailer-orders`);
     console.log(`   - Transporters: /api/transporters`);
+    console.log(`   - Notifications: /api/notifications`);
     console.log(`   - TODO System: /api/todo`);
     console.log(`   - Password Reset: /api/auth/forgot-password`);
     console.log(`   - System Health: /api/health`);
     console.log(`   - React Native Test: /api/react-native-test`);
     console.log(`   - Mobile Diagnostics: /api/mobile-diagnostics`);
     console.log(`   - TODO System Test: /api/test-todo-system`);
+    console.log(`   - Notification System Test: /api/test-notifications`);
   });
 };
 

@@ -34,9 +34,31 @@ const Sales = ({
   const [exportLoading, setExportLoading] = useState(false);
   const [showShareOptions, setShowShareOptions] = useState(null);
 
-  // Initialize sales data
+  // Initialize sales data with proper date handling
   useEffect(() => {
-    setAllSales(wholesaleSales);
+    const processedSales = wholesaleSales.map(sale => ({
+      ...sale,
+      // Ensure saleDate is properly formatted
+      saleDate: sale.saleDate || sale.createdAt || new Date().toISOString(),
+      // Ensure customer details exist
+      customerName: sale.customerName || sale.customerDetails?.name || 'Unknown Customer',
+      customerPhone: sale.customerPhone || sale.customerDetails?.phone || 'N/A',
+      customerBusinessName: sale.customerBusinessName || sale.customerDetails?.businessName || '',
+      // Ensure financial data exists
+      grandTotal: sale.grandTotal || sale.total || 0,
+      subtotal: sale.subtotal || 0,
+      totalDiscount: sale.totalDiscount || 0,
+      amountPaid: sale.amountPaid || 0,
+      balanceDue: sale.balanceDue || 0,
+      // Ensure items array exists
+      items: sale.items || [],
+      // Ensure status fields exist
+      status: sale.status || 'completed',
+      paymentStatus: sale.paymentStatus || 'paid',
+      paymentMethod: sale.paymentMethod || 'cash'
+    }));
+    
+    setAllSales(processedSales);
   }, [wholesaleSales]);
 
   // Filter sales based on current filters
@@ -77,23 +99,38 @@ const Sales = ({
       switch (dateFilter) {
         case 'today':
           filtered = filtered.filter(sale => {
-            const saleDate = new Date(sale.saleDate);
-            return saleDate >= today;
+            try {
+              const saleDate = new Date(sale.saleDate);
+              return saleDate >= today;
+            } catch (error) {
+              console.warn('Invalid date for sale:', sale.referenceNumber, sale.saleDate);
+              return false;
+            }
           });
           break;
         case 'week':
           const startOfWeek = new Date(today);
           startOfWeek.setDate(today.getDate() - today.getDay());
           filtered = filtered.filter(sale => {
-            const saleDate = new Date(sale.saleDate);
-            return saleDate >= startOfWeek;
+            try {
+              const saleDate = new Date(sale.saleDate);
+              return saleDate >= startOfWeek;
+            } catch (error) {
+              console.warn('Invalid date for sale:', sale.referenceNumber, sale.saleDate);
+              return false;
+            }
           });
           break;
         case 'month':
           const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
           filtered = filtered.filter(sale => {
-            const saleDate = new Date(sale.saleDate);
-            return saleDate >= startOfMonth;
+            try {
+              const saleDate = new Date(sale.saleDate);
+              return saleDate >= startOfMonth;
+            } catch (error) {
+              console.warn('Invalid date for sale:', sale.referenceNumber, sale.saleDate);
+              return false;
+            }
           });
           break;
         default:
@@ -118,21 +155,39 @@ const Sales = ({
     }).format(amount || 0);
   };
 
-  // Format date
+  // Safe date formatting with error handling
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Invalid Date';
+      }
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
+      return 'Invalid Date';
+    }
   };
 
-  // Format date for display
+  // Format date for display (short version)
   const formatDisplayDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Invalid';
+      }
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.warn('Error formatting display date:', dateString, error);
+      return 'Invalid';
+    }
   };
 
   // Get status badge
@@ -169,12 +224,12 @@ const Sales = ({
   // Generate receipt text for WhatsApp
   const generateReceiptText = (sale) => {
     const itemsText = sale.items?.map(item => 
-      `• ${item.productName} (${item.quantity} x ${formatCurrency(item.unitPrice)}) = ${formatCurrency(item.total)}${item.discount > 0 ? ` - ${item.discount}% discount` : ''}`
-    ).join('\n');
+      `• ${item.productName || 'Unknown Product'} (${item.quantity || 0} x ${formatCurrency(item.unitPrice || 0)}) = ${formatCurrency(item.total || 0)}${item.discount > 0 ? ` - ${item.discount}% discount` : ''}`
+    ).join('\n') || '• No items listed';
 
     return `🛍️ *SALES RECEIPT - TRADE UGANDA*
 
-📋 *Reference:* ${sale.referenceNumber}
+📋 *Reference:* ${sale.referenceNumber || 'N/A'}
 📅 *Date:* ${formatDate(sale.saleDate)}
 
 👤 *CUSTOMER INFORMATION*
@@ -193,8 +248,8 @@ Amount Paid: ${formatCurrency(sale.amountPaid)}
 ${sale.balanceDue > 0 ? `Balance Due: ${formatCurrency(sale.balanceDue)}` : ''}
 
 💳 *PAYMENT DETAILS*
-Method: ${sale.paymentMethod?.replace('_', ' ').toUpperCase()}
-Status: ${sale.paymentStatus?.toUpperCase()}
+Method: ${(sale.paymentMethod || 'cash')?.replace('_', ' ').toUpperCase()}
+Status: ${(sale.paymentStatus || 'paid')?.toUpperCase()}
 
 Thank you for your business! 🙏
 *TRADE UGANDA*`;
@@ -203,7 +258,11 @@ Thank you for your business! 🙏
   // Share to WhatsApp as text
   const shareToWhatsAppText = (sale) => {
     const receiptText = generateReceiptText(sale);
-    const phoneNumber = sale.customerPhone.replace(/\D/g, ''); // Remove non-digits
+    const phoneNumber = sale.customerPhone?.replace(/\D/g, '') || ''; // Remove non-digits
+    if (!phoneNumber) {
+      alert('Customer phone number not available');
+      return;
+    }
     const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(receiptText)}`;
     window.open(whatsappUrl, '_blank');
     setShowShareOptions(null);
@@ -248,7 +307,7 @@ Thank you for your business! 🙏
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Receipt - ${sale.referenceNumber}</title>
+        <title>Receipt - ${sale.referenceNumber || 'N/A'}</title>
         <style>
           body { 
             font-family: 'Courier New', monospace; 
@@ -308,7 +367,7 @@ Thank you for your business! 🙏
         <div class="header">
           <div class="business-name">TRADE UGANDA</div>
           <div class="receipt-title">SALES RECEIPT</div>
-          <div>Reference: ${sale.referenceNumber}</div>
+          <div>Reference: ${sale.referenceNumber || 'N/A'}</div>
           <div>Date: ${formatDate(sale.saleDate)}</div>
         </div>
 
@@ -324,11 +383,11 @@ Thank you for your business! 🙏
           <div class="section-title">ITEMS SOLD</div>
           ${sale.items?.map(item => `
             <div class="item-row">
-              <div>${item.productName} (${item.quantity}x${formatCurrency(item.unitPrice)})</div>
-              <div>${formatCurrency(item.total)}</div>
+              <div>${item.productName || 'Unknown Product'} (${item.quantity || 0}x${formatCurrency(item.unitPrice || 0)})</div>
+              <div>${formatCurrency(item.total || 0)}</div>
             </div>
             ${item.discount > 0 ? `<div style="font-size: 12px; color: #666; margin-left: 20px;">Discount: ${item.discount}%</div>` : ''}
-          `).join('')}
+          `).join('') || '<div>No items listed</div>'}
         </div>
 
         <div class="section">
@@ -359,8 +418,8 @@ Thank you for your business! 🙏
 
         <div class="section">
           <div class="section-title">PAYMENT DETAILS</div>
-          <div>Method: ${sale.paymentMethod?.replace('_', ' ').toUpperCase()}</div>
-          <div>Status: ${sale.paymentStatus?.toUpperCase()}</div>
+          <div>Method: ${(sale.paymentMethod || 'cash')?.replace('_', ' ').toUpperCase()}</div>
+          <div>Status: ${(sale.paymentStatus || 'paid')?.toUpperCase()}</div>
           ${sale.saleNotes ? `<div>Notes: ${sale.saleNotes}</div>` : ''}
         </div>
 
@@ -401,10 +460,10 @@ Thank you for your business! 🙏
       
       filteredSales.forEach(sale => {
         const itemsList = sale.items?.map(item => 
-          `${item.productName} (${item.quantity})`
-        ).join('; ') || '';
+          `${item.productName || 'Unknown'} (${item.quantity || 0})`
+        ).join('; ') || 'No items';
         
-        csv += `"${sale.referenceNumber}","${formatDate(sale.saleDate)}","${sale.customerName}","${sale.customerPhone}","${itemsList}",${sale.grandTotal},"${sale.paymentMethod}","${sale.paymentStatus}","${sale.status}"\n`;
+        csv += `"${sale.referenceNumber || 'N/A'}","${formatDate(sale.saleDate)}","${sale.customerName || 'Unknown'}","${sale.customerPhone || 'N/A'}","${itemsList}",${sale.grandTotal || 0},"${sale.paymentMethod || 'cash'}","${sale.paymentStatus || 'paid'}","${sale.status || 'completed'}"\n`;
       });
       
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -607,7 +666,7 @@ Thank you for your business! 🙏
                   </span>
                 </div>
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                  {sale.referenceNumber}
+                  {sale.referenceNumber || 'No Reference'}
                 </h3>
               </div>
               <div className="flex space-x-1">

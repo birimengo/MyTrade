@@ -1,23 +1,43 @@
+// components/CustomTitleBar.jsx
 import React from 'react';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
-import { FaTimes, FaSquare, FaMinus, FaSun, FaMoon, FaStore, FaBoxes, FaIndustry, FaShippingFast, FaSync } from 'react-icons/fa';
+import NotificationBell from './NotificationBell'; // Import from separate file
+import { 
+  FaTimes, 
+  FaSquare, 
+  FaMinus, 
+  FaSun, 
+  FaMoon, 
+  FaStore, 
+  FaBoxes, 
+  FaIndustry, 
+  FaShippingFast, 
+  FaSync
+} from 'react-icons/fa';
 
+// Main CustomTitleBar Component
 const CustomTitleBar = ({ isOnline, syncStatus, pendingSyncCount, getConnectionIcon, getSyncStatusText, onManualSync }) => {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user } = useAuth();
   const isElectron = window.electronAPI;
 
   const handleMinimize = () => {
-    window.electronAPI.minimizeWindow();
+    if (window.electronAPI?.minimizeWindow) {
+      window.electronAPI.minimizeWindow();
+    }
   };
 
   const handleMaximize = () => {
-    window.electronAPI.maximizeWindow();
+    if (window.electronAPI?.maximizeWindow) {
+      window.electronAPI.maximizeWindow();
+    }
   };
 
   const handleClose = () => {
-    window.electronAPI.closeWindow();
+    if (window.electronAPI?.closeWindow) {
+      window.electronAPI.closeWindow();
+    }
   };
 
   // Get role-specific dashboard title and icon
@@ -131,6 +151,14 @@ const CustomTitleBar = ({ isOnline, syncStatus, pendingSyncCount, getConnectionI
             )}
           </button>
         </div>
+
+        {/* Notification Bell - Only show for wholesalers */}
+        {user?.role === 'wholesaler' && (
+          <NotificationBell 
+            isElectron={isElectron} 
+            isDarkMode={isDarkMode} 
+          />
+        )}
 
         {/* Dark Mode Toggle */}
         <button

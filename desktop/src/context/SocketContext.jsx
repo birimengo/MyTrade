@@ -1,10 +1,11 @@
-// src/context/SocketContext.js
+// src/context/SocketContext.jsx - COMPLETE WITH PROPER EXPORTS
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import socketService from '../services/SocketService';
 
 const SocketContext = createContext();
 
+// Export the useSocket hook - THIS WAS MISSING
 export const useSocket = () => {
   const context = useContext(SocketContext);
   if (!context) {
@@ -20,11 +21,11 @@ export const SocketProvider = ({ children }) => {
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState({});
-  const [connectionHealth, setConnectionHealth] = useState({ healthy: false, lastCheck: null });
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   
   const initializationRef = useRef(false);
   const reconnectTimeoutRef = useRef(null);
-  const healthCheckIntervalRef = useRef(null);
   const listenersRef = useRef(new Map());
 
   // Initialize socket connection with enhanced error handling
@@ -42,16 +43,16 @@ export const SocketProvider = ({ children }) => {
       const connectedSocket = await socketService.connect();
       setSocket(connectedSocket);
       
-      // Setup event listeners
+      // Setup event listeners including notification handlers
       setupEventListeners();
       
-      // Start health monitoring
-      startHealthMonitoring();
-      
-      // Sync any pending messages
-      setTimeout(() => {
-        socketService.syncPendingMessages();
-      }, 2000);
+      // Join user's notification room immediately after connection
+      if (user._id) {
+        setTimeout(() => {
+          socketService.emit('join_user_room', user._id);
+          console.log('🔔 Joined user notification room:', user._id);
+        }, 1000);
+      }
       
       console.log('✅ Socket initialization complete');
 
@@ -75,31 +76,32 @@ export const SocketProvider = ({ children }) => {
     }
   }, [user, isAuthenticated]);
 
-  // Setup all event listeners
+  // Setup all event listeners including notification handlers
   const setupEventListeners = useCallback(() => {
     console.log('🔧 Setting up socket event listeners');
 
     const listeners = {
-      // Connection events - FIXED: Use correct event names
-      connect: () => {
+      // Connection events
+      connected: (data) => {
         console.log('✅ Socket connected in context');
         setIsConnected(true);
         setConnectionStatus('connected');
-        setConnectionHealth(prev => ({ ...prev, healthy: true, lastCheck: new Date().toISOString() }));
+      },
+
+      authenticated: (data) => {
+        console.log('✅ Socket authenticated in context for user:', data.userId);
       },
 
       disconnect: (reason) => {
         console.log('🔌 Socket disconnected in context:', reason);
         setIsConnected(false);
         setConnectionStatus('disconnected');
-        setConnectionHealth(prev => ({ ...prev, healthy: false }));
       },
 
       connect_error: (error) => {
         console.error('❌ Socket connection error in context:', error.message);
         setIsConnected(false);
         setConnectionStatus('error');
-        setConnectionHealth(prev => ({ ...prev, healthy: false }));
       },
 
       // User events
@@ -119,21 +121,16 @@ export const SocketProvider = ({ children }) => {
         });
       },
 
+      // NEW: User room confirmation
+      user_room_joined: (data) => {
+        console.log('✅ Successfully joined user notification room:', data.userId);
+      },
+
       // Chat events
       message: (message) => {
         console.log('📨 New message received in context:', message._id);
-        // Emit custom event for components to listen to
+        // Emit custom event for message components
         window.dispatchEvent(new CustomEvent('socketMessage', { detail: message }));
-      },
-
-      message_delivered: (data) => {
-        console.log('✅ Message delivered:', data.messageId);
-        window.dispatchEvent(new CustomEvent('socketMessageDelivered', { detail: data }));
-      },
-
-      message_read: (data) => {
-        console.log('📖 Message read:', data.messageId);
-        window.dispatchEvent(new CustomEvent('socketMessageRead', { detail: data }));
       },
 
       typing: (data) => {
@@ -154,6 +151,207 @@ export const SocketProvider = ({ children }) => {
         console.log('🔄 Conversation updated:', data.conversationId);
       },
 
+      // NEW: REAL-TIME NOTIFICATION EVENTS
+      new_notification: (data) => {
+        console.log('🔔 New notification received:', data.notification?.title);
+        const newNotification = data.notification;
+        
+        // Update notifications state
+        setNotifications(prev => [newNotification, ...prev.slice(0, 19)]);
+        setUnreadCount(prev => prev + 1);
+        
+        // Emit custom event for notification components
+        window.dispatchEvent(new CustomEvent('socketNotification', { 
+          detail: {
+            type: 'new_notification',
+            notification: newNotification,
+            timestamp: new Date().toISOString()
+          }
+        }));
+        
+        // Show browser notification for important notifications
+        if (newNotification.priority === 'high' || newNotification.priority === 'urgent') {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(newNotification.title, {
+              body: newNotification.message,
+              icon: '/favicon.ico'
+            });
+          } else if (Notification.permission !== 'denied') {
+            // Request permission if not already granted or denied
+            Notification.requestPermission().then(permission => {
+              if (permission === 'granted') {
+                new Notification(newNotification.title, {
+                  body: newNotification.message,
+                  icon: '/favicon.ico'
+                });
+              }
+            });
+          }
+        }
+      },
+
+      new_order: (data) => {
+        console.log('🛒 New order notification received:', data.order?._id);
+        
+        // Emit custom event specifically for new orders
+        window.dispatchEvent(new CustomEvent('socketNewOrder', { 
+          detail: {
+            type: 'new_order',
+            order: data.order,
+            notification: data.notification,
+            timestamp: new Date().toISOString()
+          }
+        }));
+
+        // Also emit as a general notification
+        window.dispatchEvent(new CustomEvent('socketNotification', { 
+          detail: {
+            type: 'new_order',
+            order: data.order,
+            notification: data.notification,
+            timestamp: new Date().toISOString()
+          }
+        }));
+
+        // Update notifications state
+        if (data.notification) {
+          setNotifications(prev => [data.notification, ...prev.slice(0, 19)]);
+          setUnreadCount(prev => prev + 1);
+        }
+
+        // Show browser notification for new orders
+        if ('Notification' in window) {
+          if (Notification.permission === 'granted') {
+            new Notification('New Order! 🛒', {
+              body: `You have a new order for ${data.order.quantity} ${data.order.measurementUnit} of ${data.order.productName}`,
+              icon: '/favicon.ico',
+              tag: 'new-order'
+            });
+          } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(permission => {
+              if (permission === 'granted') {
+                new Notification('New Order! 🛒', {
+                  body: `You have a new order for ${data.order.quantity} ${data.order.measurementUnit} of ${data.order.productName}`,
+                  icon: '/favicon.ico',
+                  tag: 'new-order'
+                });
+              }
+            });
+          }
+        }
+      },
+
+      // NEW: Order status update events
+      order_status_update: (data) => {
+        console.log('📦 Order status update received:', data.orderId, data.status);
+        window.dispatchEvent(new CustomEvent('socketOrderStatusUpdate', { 
+          detail: {
+            type: 'order_status_update',
+            orderId: data.orderId,
+            status: data.status,
+            data: data,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      },
+
+      order_assigned: (data) => {
+        console.log('🚚 Order assigned to transporter:', data.orderId);
+        window.dispatchEvent(new CustomEvent('socketOrderAssigned', { 
+          detail: {
+            type: 'order_assigned',
+            orderId: data.orderId,
+            transporterId: data.transporterId,
+            data: data,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      },
+
+      order_delivered: (data) => {
+        console.log('📬 Order delivered:', data.orderId);
+        window.dispatchEvent(new CustomEvent('socketOrderDelivered', { 
+          detail: {
+            type: 'order_delivered',
+            orderId: data.orderId,
+            data: data,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      },
+
+      order_disputed: (data) => {
+        console.log('⚠️ Order disputed:', data.orderId);
+        window.dispatchEvent(new CustomEvent('socketOrderDisputed', { 
+          detail: {
+            type: 'order_disputed',
+            orderId: data.orderId,
+            reason: data.reason,
+            data: data,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      },
+
+      order_return: (data) => {
+        console.log('🔄 Order return requested:', data.orderId);
+        window.dispatchEvent(new CustomEvent('socketOrderReturn', { 
+          detail: {
+            type: 'order_return',
+            orderId: data.orderId,
+            reason: data.returnReason,
+            data: data,
+            timestamp: new Date().toISOString()
+          }
+        }));
+      },
+
+      // NEW: Notification status events
+      notification_marked_read: (data) => {
+        console.log('✅ Notification marked as read:', data.notificationId);
+        setNotifications(prev => 
+          prev.map(notif => 
+            notif._id === data.notificationId 
+              ? { ...notif, read: true, readAt: new Date() }
+              : notif
+          )
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      },
+
+      all_notifications_marked_read: (data) => {
+        console.log('✅ All notifications marked as read for user:', data.userId);
+        setNotifications(prev => 
+          prev.map(notif => ({ ...notif, read: true, readAt: new Date() }))
+        );
+        setUnreadCount(0);
+      },
+
+      unread_count_updated: (data) => {
+        console.log('🔢 Unread count updated:', data.count);
+        setUnreadCount(data.count);
+      },
+
+      // Test notification events
+      test_notification_sent: (data) => {
+        console.log('🧪 Test notification sent successfully:', data.userId);
+        // Use browser notification instead of alert for better UX
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Test Notification', {
+            body: 'Test notification sent successfully!',
+            icon: '/favicon.ico'
+          });
+        } else {
+          console.log('🧪 Test notification sent successfully');
+        }
+      },
+
+      test_notification_error: (data) => {
+        console.error('❌ Test notification failed:', data.error);
+        // Use console.error instead of alert for errors
+        console.error('Test notification failed:', data.error);
+      },
+
       // Error events
       error: (error) => {
         console.error('🚨 Socket error event in context:', error);
@@ -163,6 +361,16 @@ export const SocketProvider = ({ children }) => {
       message_error: (error) => {
         console.error('❌ Message error in context:', error);
         window.dispatchEvent(new CustomEvent('socketMessageError', { detail: error }));
+      },
+
+      authentication_failed: (data) => {
+        console.error('❌ Authentication failed in context:', data.message);
+        window.dispatchEvent(new CustomEvent('socketAuthError', { detail: data }));
+      },
+
+      notification_error: (error) => {
+        console.error('🔔 Notification error in context:', error);
+        window.dispatchEvent(new CustomEvent('socketNotificationError', { detail: error }));
       },
 
       // Reconnection events
@@ -194,42 +402,14 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
-  // Health monitoring
-  const startHealthMonitoring = useCallback(() => {
-    if (healthCheckIntervalRef.current) {
-      clearInterval(healthCheckIntervalRef.current);
-    }
-
-    healthCheckIntervalRef.current = setInterval(async () => {
-      if (socketService.getIsConnected()) {
-        try {
-          const health = await socketService.healthCheck();
-          setConnectionHealth({
-            healthy: health.healthy,
-            lastCheck: new Date().toISOString(),
-            transport: health.transport,
-            latency: health.latency
-          });
-        } catch (error) {
-          setConnectionHealth(prev => ({ ...prev, healthy: false }));
-        }
-      }
-    }, 30000); // Check every 30 seconds
-  }, []);
-
   // Cleanup function
   const cleanup = useCallback(() => {
     console.log('🧹 Cleaning up socket context...');
     
-    // Clear timeouts and intervals
+    // Clear timeouts
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
-    }
-    
-    if (healthCheckIntervalRef.current) {
-      clearInterval(healthCheckIntervalRef.current);
-      healthCheckIntervalRef.current = null;
     }
     
     // Remove listeners
@@ -246,8 +426,18 @@ export const SocketProvider = ({ children }) => {
     setConnectionStatus('disconnected');
     setOnlineUsers([]);
     setTypingUsers({});
-    setConnectionHealth({ healthy: false, lastCheck: null });
+    setNotifications([]);
+    setUnreadCount(0);
     initializationRef.current = false;
+  }, []);
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('🔔 Notification permission:', permission);
+      });
+    }
   }, []);
 
   // Main useEffect
@@ -278,6 +468,67 @@ export const SocketProvider = ({ children }) => {
     socketService.sendTyping(conversationId, isTyping);
   }, []);
 
+  // NEW: Notification methods
+  const joinUserRoom = useCallback(() => {
+    if (user?._id) {
+      socketService.emit('join_user_room', user._id);
+      console.log('🔔 Joining user notification room:', user._id);
+      return true;
+    }
+    return false;
+  }, [user]);
+
+  const markNotificationRead = useCallback((notificationId) => {
+    return new Promise((resolve, reject) => {
+      socketService.emit('mark_notification_read', { notificationId }, (response) => {
+        if (response?.success) {
+          resolve(response);
+        } else {
+          reject(response?.error || 'Failed to mark notification as read');
+        }
+      });
+    });
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      socketService.emit('mark_all_notifications_read', {}, (response) => {
+        if (response?.success) {
+          resolve(response);
+        } else {
+          reject(response?.error || 'Failed to mark all notifications as read');
+        }
+      });
+    });
+  }, []);
+
+  const getUnreadCount = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      socketService.emit('get_unread_count', {}, (response) => {
+        if (response?.success) {
+          resolve(response);
+        } else {
+          reject(response?.error || 'Failed to get unread count');
+        }
+      });
+    });
+  }, []);
+
+  const sendTestNotification = useCallback((testData = {}) => {
+    return new Promise((resolve, reject) => {
+      socketService.emit('test_notification', {
+        userId: user?._id,
+        ...testData
+      }, (response) => {
+        if (response?.success) {
+          resolve(response);
+        } else {
+          reject(response?.error || 'Failed to send test notification');
+        }
+      });
+    });
+  }, [user]);
+
   const syncPendingMessages = useCallback(() => {
     return socketService.syncPendingMessages();
   }, []);
@@ -293,7 +544,9 @@ export const SocketProvider = ({ children }) => {
     connectionStatus,
     onlineUsers,
     typingUsers,
-    connectionHealth,
+    notifications,
+    unreadCount,
+    connectionHealth: { healthy: isConnected, lastCheck: new Date().toISOString() },
     
     // Socket methods
     emit: (event, data, callback) => socketService.emit(event, data, callback),
@@ -311,6 +564,87 @@ export const SocketProvider = ({ children }) => {
     leaveConversation,
     setTyping,
     syncPendingMessages,
+    
+    // NEW: Notification methods
+    joinUserRoom,
+    markNotificationRead,
+    markAllNotificationsRead,
+    getUnreadCount,
+    sendTestNotification,
+    
+    // NEW: Helper methods for real-time events
+    listenForNotifications: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketNotification', handler);
+      return () => window.removeEventListener('socketNotification', handler);
+    },
+    
+    listenForNewOrders: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketNewOrder', handler);
+      return () => window.removeEventListener('socketNewOrder', handler);
+    },
+    
+    listenForMessages: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketMessage', handler);
+      return () => window.removeEventListener('socketMessage', handler);
+    },
+    
+    listenForOrderUpdates: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketOrderStatusUpdate', handler);
+      return () => window.removeEventListener('socketOrderStatusUpdate', handler);
+    },
+    
+    listenForOrderAssignments: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketOrderAssigned', handler);
+      return () => window.removeEventListener('socketOrderAssigned', handler);
+    },
+    
+    listenForOrderDeliveries: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketOrderDelivered', handler);
+      return () => window.removeEventListener('socketOrderDelivered', handler);
+    },
+    
+    listenForOrderDisputes: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketOrderDisputed', handler);
+      return () => window.removeEventListener('socketOrderDisputed', handler);
+    },
+    
+    listenForOrderReturns: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketOrderReturn', handler);
+      return () => window.removeEventListener('socketOrderReturn', handler);
+    },
+    
+    listenForErrors: (callback) => {
+      const handler = (event) => callback(event.detail);
+      window.addEventListener('socketError', handler);
+      return () => window.removeEventListener('socketError', handler);
+    },
+    
+    // NEW: State management helpers
+    addNotification: (notification) => {
+      setNotifications(prev => [notification, ...prev.slice(0, 19)]);
+      setUnreadCount(prev => prev + 1);
+    },
+    
+    clearNotifications: () => {
+      setNotifications([]);
+      setUnreadCount(0);
+    },
+    
+    updateNotification: (notificationId, updates) => {
+      setNotifications(prev => 
+        prev.map(notif => 
+          notif._id === notificationId ? { ...notif, ...updates } : notif
+        )
+      );
+    }
   };
 
   return (
@@ -319,3 +653,6 @@ export const SocketProvider = ({ children }) => {
     </SocketContext.Provider>
   );
 };
+
+// Export the SocketProvider as default
+export default SocketProvider;

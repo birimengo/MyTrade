@@ -10,13 +10,18 @@ import {
   FaImage,
   FaBox,
   FaTag,
-  FaShoppingCart
+  FaShoppingCart,
+  FaPlusCircle, // NEW: Restock icon
+  FaHistory, // NEW: History icon
+  FaWarehouse, // NEW: Warehouse icon
+  FaMoneyBillWave // NEW: Money icon
 } from 'react-icons/fa';
 
 const MyProducts = ({ 
   products, 
   handleEdit, 
   handleDelete, 
+  handleRestock, // NEW: Restock handler
   setShowCreateForm, 
   highlightedProduct,
   isElectron,
@@ -24,6 +29,7 @@ const MyProducts = ({
 }) => {
   const [visibleProducts, setVisibleProducts] = useState({});
   const [currentImageIndex, setCurrentImageIndex] = useState({});
+  const [expandedProduct, setExpandedProduct] = useState(null); // NEW: For expanded view
   const highlightedRef = useRef(null);
 
   // Initialize visibility state for all products
@@ -62,6 +68,12 @@ const MyProducts = ({
     }));
   };
 
+  // NEW: Toggle expanded view
+  const toggleExpandedView = (productId, event) => {
+    event?.stopPropagation();
+    setExpandedProduct(prev => prev === productId ? null : productId);
+  };
+
   const navigateImage = (productId, direction, event) => {
     event?.stopPropagation();
     setCurrentImageIndex(prev => {
@@ -85,10 +97,76 @@ const MyProducts = ({
     });
   };
 
-  const getStockStatus = (quantity) => {
-    if (quantity > 10) return { text: 'In Stock', color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/20' };
-    if (quantity > 0) return { text: 'Low Stock', color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/20' };
-    return { text: 'Out of Stock', color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/20' };
+  const getStockStatus = (quantity, lowStockThreshold = 0.5, originalStockQuantity = 0) => {
+    if (quantity === 0) {
+      return { 
+        text: 'Out of Stock', 
+        color: 'text-red-600 dark:text-red-400', 
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        level: 'out'
+      };
+    }
+    
+    if (originalStockQuantity > 0) {
+      const stockPercentage = quantity / originalStockQuantity;
+      if (stockPercentage <= lowStockThreshold) {
+        return { 
+          text: 'Low Stock', 
+          color: 'text-yellow-600 dark:text-yellow-400', 
+          bg: 'bg-yellow-100 dark:bg-yellow-900/20',
+          level: 'low'
+        };
+      }
+    } else {
+      // Fallback for products without original stock quantity
+      if (quantity <= 10) {
+        return { 
+          text: 'Low Stock', 
+          color: 'text-yellow-600 dark:text-yellow-400', 
+          bg: 'bg-yellow-100 dark:bg-yellow-900/20',
+          level: 'low'
+        };
+      }
+    }
+    
+    return { 
+      text: 'In Stock', 
+      color: 'text-green-600 dark:text-green-400', 
+      bg: 'bg-green-100 dark:bg-green-900/20',
+      level: 'good'
+    };
+  };
+
+  // NEW: Calculate profit metrics
+  const calculateProfitMetrics = (product) => {
+    const costPrice = product.costPrice || 0;
+    const sellingPrice = product.price || 0;
+    const quantity = product.quantity || 0;
+    
+    const profitPerUnit = sellingPrice - costPrice;
+    const profitMargin = costPrice > 0 ? (profitPerUnit / costPrice) * 100 : 0;
+    const totalProfitPotential = profitPerUnit * quantity;
+    const stockValue = costPrice * quantity;
+    
+    return {
+      profitPerUnit,
+      profitMargin,
+      totalProfitPotential,
+      stockValue,
+      hasProfit: profitPerUnit > 0
+    };
+  };
+
+  // NEW: Format restock statistics
+  const formatRestockStats = (product) => {
+    const stats = product.restockStatistics || {};
+    return {
+      totalRestocks: stats.totalRestocks || 0,
+      totalQuantityAdded: stats.totalQuantityAdded || 0,
+      totalInvestment: stats.totalInvestment || 0,
+      lastRestockDate: stats.lastRestockDate,
+      averageRestockQuantity: stats.averageRestockQuantity || 0
+    };
   };
 
   if (products.length === 0) {
@@ -143,14 +221,22 @@ const MyProducts = ({
           const totalImages = product.images?.length || 0;
           const currentImage = product.images?.[currentIndex]?.url;
           const isHighlighted = product._id === highlightedProduct;
-          const stockStatus = getStockStatus(product.quantity);
+          const isExpanded = expandedProduct === product._id; // NEW: Expanded state
+          const stockStatus = getStockStatus(
+            product.quantity, 
+            product.lowStockThreshold, 
+            product.originalStockQuantity
+          );
+          const profitMetrics = calculateProfitMetrics(product); // NEW: Profit metrics
+          const restockStats = formatRestockStats(product); // NEW: Restock stats
 
           return (
             <div 
               key={product._id} 
               ref={isHighlighted ? highlightedRef : null}
               className={`
-                border rounded-xl p-4 transition-all duration-300 hover:shadow-lg h-[420px] flex flex-col
+                border rounded-xl p-4 transition-all duration-300 hover:shadow-lg flex flex-col
+                ${isExpanded ? 'h-auto' : 'h-[420px]'}
                 ${isHighlighted 
                   ? 'border-2 border-yellow-500 bg-yellow-50 dark:bg-yellow-900/10 shadow-lg' 
                   : 'border-gray-200 dark:border-gray-700 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600'
@@ -235,6 +321,15 @@ const MyProducts = ({
                     {stockStatus.text}
                   </span>
                 </div>
+
+                {/* NEW: Expand/Collapse Button */}
+                <button
+                  onClick={(e) => toggleExpandedView(product._id, e)}
+                  className="absolute bottom-2 right-2 bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-700 p-2 rounded-full shadow-md transition-all duration-200 hover:scale-110"
+                  title={isExpanded ? 'Collapse details' : 'Expand details'}
+                >
+                  <FaHistory className={`w-4 h-4 text-gray-700 dark:text-gray-300 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                </button>
               </div>
 
               {/* Product Info */}
@@ -267,6 +362,14 @@ const MyProducts = ({
                     </span>
                   </div>
 
+                  {/* NEW: Cost Price Display */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Cost Price:</span>
+                    <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                      UGX {product.costPrice?.toLocaleString()}
+                    </span>
+                  </div>
+
                   {product.minOrderQuantity > 0 && (
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-600 dark:text-gray-400">Min Order:</span>
@@ -282,6 +385,87 @@ const MyProducts = ({
                       <span className="text-xs text-green-600 dark:text-green-400 font-medium">
                         {product.discountPercentage}% off
                       </span>
+                    </div>
+                  )}
+
+                  {/* NEW: Expanded Details */}
+                  {isExpanded && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                      {/* Profit Metrics */}
+                      <div className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/10 dark:to-blue-900/10 rounded-lg p-3">
+                        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center space-x-1">
+                          <FaMoneyBillWave className="text-green-500" />
+                          <span>Profit Analysis</span>
+                        </h4>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-gray-600 dark:text-gray-400">Profit/Unit:</span>
+                            <div className={`font-semibold ${profitMetrics.hasProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              UGX {profitMetrics.profitPerUnit.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-gray-600 dark:text-gray-400">Margin:</span>
+                            <div className={`font-semibold ${profitMetrics.hasProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {profitMetrics.profitMargin.toFixed(2)}%
+                            </div>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-gray-600 dark:text-gray-400">Total Profit Potential:</span>
+                            <div className={`font-semibold ${profitMetrics.hasProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              UGX {profitMetrics.totalProfitPotential.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Restock Statistics */}
+                      {restockStats.totalRestocks > 0 && (
+                        <div className="bg-gradient-to-r from-orange-50 to-purple-50 dark:from-orange-900/10 dark:to-purple-900/10 rounded-lg p-3">
+                          <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center space-x-1">
+                            <FaWarehouse className="text-orange-500" />
+                            <span>Restock History</span>
+                          </h4>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-gray-600 dark:text-gray-400">Total Restocks:</span>
+                              <div className="font-semibold text-orange-600 dark:text-orange-400">
+                                {restockStats.totalRestocks}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-gray-600 dark:text-gray-400">Quantity Added:</span>
+                              <div className="font-semibold text-purple-600 dark:text-purple-400">
+                                {restockStats.totalQuantityAdded.toLocaleString()}
+                              </div>
+                            </div>
+                            <div className="col-span-2">
+                              <span className="text-gray-600 dark:text-gray-400">Total Investment:</span>
+                              <div className="font-semibold text-orange-600 dark:text-orange-400">
+                                UGX {restockStats.totalInvestment.toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Product Metadata */}
+                      <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        <div className="flex justify-between">
+                          <span>SKU:</span>
+                          <span className="font-mono">{product.sku || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Category:</span>
+                          <span>{product.category}</span>
+                        </div>
+                        {product.fromCertifiedOrder && (
+                          <div className="flex justify-between">
+                            <span>Type:</span>
+                            <span className="text-blue-600 dark:text-blue-400">Certified</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -312,18 +496,45 @@ const MyProducts = ({
                 <button
                   onClick={() => handleEdit(product)}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover:shadow-md"
+                  title="Edit product details"
                 >
                   <FaEdit className="w-3 h-3" />
                   <span>Edit</span>
                 </button>
+                
+                {/* NEW: Restock Button */}
+                <button
+                  onClick={() => handleRestock(product)}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover:shadow-md"
+                  title="Restock product inventory"
+                >
+                  <FaPlusCircle className="w-3 h-3" />
+                  <span>Restock</span>
+                </button>
+                
                 <button
                   onClick={() => handleDelete(product._id)}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover:shadow-md"
+                  title="Delete product"
                 >
                   <FaTrash className="w-3 h-3" />
                   <span>Delete</span>
                 </button>
               </div>
+
+              {/* NEW: Quick Action Bar for Expanded View */}
+              {isExpanded && (
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex justify-between items-center">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Last updated: {product.updatedAt ? new Date(product.updatedAt).toLocaleDateString() : 'N/A'}
+                  </div>
+                  {restockStats.lastRestockDate && (
+                    <div className="text-xs text-green-500 dark:text-green-400">
+                      Last restock: {new Date(restockStats.lastRestockDate).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

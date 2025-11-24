@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import ErrorBoundary from '../ErrorBoundary';
 import AddProducts from './AddProducts';
 import MyProducts from './MyProducts';
+import RestockModal from './RestockModal'; // NEW IMPORT
 import { 
   FaBox, 
   FaPlus, 
@@ -14,7 +15,11 @@ import {
   FaChartLine,
   FaDollarSign,
   FaFilter,
-  FaSearch
+  FaSearch,
+  FaHistory,
+  FaWarehouse,
+  FaMoneyBillWave,
+  FaClipboardList
 } from 'react-icons/fa';
 
 const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
@@ -23,13 +28,15 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('myProducts');
   const [editingProduct, setEditingProduct] = useState(null);
+  const [restockingProduct, setRestockingProduct] = useState(null); // NEW STATE
   const [categories, setCategories] = useState([]);
   const [highlightedProduct, setHighlightedProduct] = useState(null);
   const [lastSync, setLastSync] = useState(null);
   const [profitAnalytics, setProfitAnalytics] = useState(null);
+  const [restockAnalytics, setRestockAnalytics] = useState(null); // NEW STATE
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [productFilter, setProductFilter] = useState('all'); // 'all', 'certified', 'manual'
+  const [productFilter, setProductFilter] = useState('all');
   const { user, getAuthHeaders, API_BASE_URL } = useAuth();
 
   // Safe Electron API access
@@ -108,6 +115,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
   useEffect(() => {
     fetchProducts();
     fetchCategories();
+    fetchRestockAnalytics(); // NEW: Fetch restock analytics
   }, []);
 
   // Debug products when they change
@@ -204,6 +212,24 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
     }
 
     return analytics;
+  };
+
+  // NEW: Fetch restock analytics from API
+  const fetchRestockAnalytics = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/products/analytics/restocks`, {
+        headers: getAuthHeaders()
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setRestockAnalytics(data.analytics);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching restock analytics:', error);
+    }
   };
 
   // Update analytics when products change
@@ -318,6 +344,9 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
         // Cache the data for offline use
         await cacheProducts(productsData);
         setLastSync(new Date().toLocaleTimeString());
+
+        // Fetch updated analytics
+        fetchRestockAnalytics();
 
         // Show desktop notification
         safeElectronAPI.showNotification(
@@ -481,6 +510,26 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
     }, 100);
   };
 
+  // NEW: Handle restock action
+  const handleRestock = (product) => {
+    setRestockingProduct(product);
+  };
+
+  // NEW: Handle restock success
+  const handleRestockSuccess = (updatedProduct) => {
+    fetchProducts(); // Refresh products list
+    fetchRestockAnalytics(); // Refresh analytics
+    safeElectronAPI.showNotification(
+      'Restock Successful',
+      `${updatedProduct.name} restocked successfully`
+    );
+  };
+
+  // NEW: Close restock modal
+  const handleCloseRestockModal = () => {
+    setRestockingProduct(null);
+  };
+
   const handleDelete = async (productId) => {
     if (!window.confirm('Are you sure you want to delete this product?')) {
       return;
@@ -525,7 +574,8 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
         totalProducts: products.length,
         lastSync: lastSync,
         activeTab: activeTab,
-        profitAnalytics: profitAnalytics
+        profitAnalytics: profitAnalytics,
+        restockAnalytics: restockAnalytics
       },
       products: products.map(product => ({
         name: product.name,
@@ -542,7 +592,9 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
         images: product.images?.length || 0,
         createdAt: product.createdAt,
         updatedAt: product.updatedAt,
-        isCertified: product.fromCertifiedOrder || false
+        isCertified: product.fromCertifiedOrder || false,
+        restockStatistics: product.restockStatistics || {},
+        lastRestock: product.lastRestock || null
       }))
     };
 
@@ -567,6 +619,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
       return;
     }
     fetchProducts();
+    fetchRestockAnalytics();
   };
 
   // Handle search with debounce
@@ -629,6 +682,20 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
 
   const quickStats = calculateQuickStats();
 
+  // NEW: Calculate restock quick stats
+  const calculateRestockStats = () => {
+    if (!restockAnalytics) return null;
+
+    return {
+      totalRestocks: restockAnalytics.totalRestocks,
+      totalQuantityAdded: restockAnalytics.totalQuantityAdded,
+      totalInvestment: restockAnalytics.totalInvestment,
+      productsNeedingRestock: restockAnalytics.productsNeedingRestock
+    };
+  };
+
+  const restockStats = calculateRestockStats();
+
   if (loading) {
     return (
       <ErrorBoundary>
@@ -669,7 +736,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
               Product Management
             </h2>
             <p className="text-gray-600 dark:text-gray-400 mt-1">
-              Manage your product catalog and inventory
+              Manage your product catalog, inventory, and restocking
               {isElectron && ' • Desktop Mode'}
             </p>
             {lastSync && (
@@ -734,6 +801,95 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
               <span>Add New Product</span>
             </button>
           </div>
+        </div>
+
+        {/* Analytics Dashboard */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {/* Profit Analytics */}
+          {quickStats && products.length > 0 && (
+            <div className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-lg p-4 border border-green-200 dark:border-green-800">
+              <div className="flex items-center space-x-3 mb-3">
+                <FaChartLine className="text-green-600 dark:text-green-400 text-xl" />
+                <div>
+                  <h4 className="text-sm font-semibold text-green-800 dark:text-green-200">
+                    Profit Analytics
+                  </h4>
+                  <p className="text-xs text-green-700 dark:text-green-300">
+                    Real-time profit overview
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-green-200 dark:border-green-700">
+                  <div className="font-semibold text-gray-800 dark:text-gray-200 text-lg">
+                    UGX {quickStats.totalInvestment?.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Total Investment</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-blue-200 dark:border-blue-700">
+                  <div className="font-semibold text-blue-600 dark:text-blue-400 text-lg">
+                    UGX {quickStats.totalPotentialRevenue?.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Potential Revenue</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-green-200 dark:border-green-700">
+                  <div className="font-semibold text-green-600 dark:text-green-400 text-lg">
+                    UGX {quickStats.totalPotentialProfit?.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Potential Profit</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700">
+                  <div className="font-semibold text-purple-600 dark:text-purple-400 text-lg">
+                    {quickStats.averageMargin?.toFixed(2)}%
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Avg Margin</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Restock Analytics */}
+          {restockStats && (
+            <div className="bg-gradient-to-r from-orange-50 to-purple-50 dark:from-orange-900/20 dark:to-purple-900/20 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
+              <div className="flex items-center space-x-3 mb-3">
+                <FaWarehouse className="text-orange-600 dark:text-orange-400 text-xl" />
+                <div>
+                  <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-200">
+                    Restock Analytics
+                  </h4>
+                  <p className="text-xs text-orange-700 dark:text-orange-300">
+                    Inventory management overview
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700">
+                  <div className="font-semibold text-gray-800 dark:text-gray-200 text-lg">
+                    {restockStats.totalRestocks}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Total Restocks</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700">
+                  <div className="font-semibold text-purple-600 dark:text-purple-400 text-lg">
+                    {restockStats.totalQuantityAdded?.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Quantity Added</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700">
+                  <div className="font-semibold text-orange-600 dark:text-orange-400 text-lg">
+                    UGX {restockStats.totalInvestment?.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Restock Investment</div>
+                </div>
+                <div className="text-center p-2 bg-white dark:bg-gray-800 rounded border border-red-200 dark:border-red-700">
+                  <div className="font-semibold text-red-600 dark:text-red-400 text-lg">
+                    {restockStats.productsNeedingRestock}
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">Need Restock</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Search and Filter Section */}
@@ -819,51 +975,6 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
           </div>
         )}
 
-        {/* Profit Analytics Banner */}
-        {quickStats && products.length > 0 && (
-          <div className="mb-4 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-lg p-4 border border-green-200 dark:border-green-800">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <FaChartLine className="text-green-600 dark:text-green-400 text-xl" />
-                <div>
-                  <h4 className="text-sm font-semibold text-green-800 dark:text-green-200">
-                    Business Overview
-                  </h4>
-                  <p className="text-xs text-green-700 dark:text-green-300">
-                    Real-time profit analytics for your inventory
-                  </p>
-                </div>
-              </div>
-              <div className="flex space-x-4 text-sm">
-                <div className="text-center">
-                  <div className="font-semibold text-gray-800 dark:text-gray-200">
-                    UGX {quickStats.totalInvestment.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Total Investment</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-semibold text-blue-600 dark:text-blue-400">
-                    UGX {quickStats.totalPotentialRevenue.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Potential Revenue</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-semibold text-green-600 dark:text-green-400">
-                    UGX {quickStats.totalPotentialProfit.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Potential Profit</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-semibold text-purple-600 dark:text-purple-400">
-                    {quickStats.averageMargin.toFixed(2)}%
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">Avg Margin</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Desktop Features Banner */}
         {isElectron && (
           <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 transition-colors duration-300">
@@ -911,6 +1022,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
+              <FaBox className="inline mr-2" />
               My Products {products.length > 0 && `(${products.length})`}
             </button>
             <button
@@ -921,6 +1033,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
+              <FaPlus className="inline mr-2" />
               {editingProduct ? 'Edit Product' : 'Add Product'}
             </button>
           </nav>
@@ -933,6 +1046,7 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
               products={filteredProducts}
               handleEdit={handleEdit}
               handleDelete={handleDelete}
+              handleRestock={handleRestock} // NEW PROP
               setShowCreateForm={() => setActiveTab('addProduct')}
               highlightedProduct={highlightedProduct}
               isElectron={isElectron}
@@ -952,6 +1066,16 @@ const Products = ({ isElectron, isOnline, onSync, syncStatus }) => {
             />
           )}
         </div>
+
+        {/* Restock Modal */}
+        {restockingProduct && (
+          <RestockModal
+            product={restockingProduct}
+            isOpen={!!restockingProduct}
+            onClose={handleCloseRestockModal}
+            onRestock={handleRestockSuccess}
+          />
+        )}
       </div>
     </ErrorBoundary>
   );

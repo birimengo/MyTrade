@@ -319,7 +319,7 @@ router.get('/quick/summary', auth, async (req, res) => {
         status: 'completed'
       })
       .sort({ createdAt: -1 })
-      .limit(100000000000000)
+      .limit(10000000000000)
       .select('referenceNumber customerName grandTotal paymentStatus createdAt')
       .lean()
     ]);

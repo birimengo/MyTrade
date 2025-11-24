@@ -422,7 +422,7 @@ router.get('/quick/summary', auth, async (req, res) => {
         status: 'completed'
       })
       .sort({ createdAt: -1 })
-      .limit(50) // Increased from 5 to 50
+      .limit(9000000000000000000000000000000) // Increased from 5 to 50
       .populate('customerId', 'businessName firstName lastName phone')
       .populate('items.productId', 'name category fromCertifiedOrder')
       .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items customerId')

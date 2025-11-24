@@ -124,7 +124,7 @@ router.get('/', auth, async (req, res) => {
     
     const { 
       page = 1, 
-      limit = 10000, 
+      limit = 1000, // Increased limit to get more sales
       startDate, 
       endDate, 
       customerId, 
@@ -134,7 +134,7 @@ router.get('/', auth, async (req, res) => {
       search,
       sortBy = 'createdAt',
       sortOrder = 'desc',
-      minimal = 'false' // New parameter to reduce data load
+      minimal = 'false'
     } = req.query;
 
     // Build optimized filter
@@ -239,7 +239,8 @@ router.get('/', auth, async (req, res) => {
       queryInfo: {
         filterApplied: Object.keys(filter).length > 1,
         searchUsed: !!search,
-        minimalData: minimal === 'true'
+        minimalData: minimal === 'true',
+        limit: parseInt(limit)
       }
     });
   } catch (error) {
@@ -266,10 +267,112 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// GET /api/wholesale-sales/quick/summary - Quick summary for dashboard (FAST)
+// GET /api/wholesale-sales/all - Get ALL sales without pagination limits
+router.get('/all', auth, async (req, res) => {
+  try {
+    console.log('📊 Fetching ALL wholesale sales for user:', req.user.id);
+    
+    const { 
+      startDate, 
+      endDate, 
+      customerId, 
+      status,
+      paymentMethod,
+      paymentStatus,
+      search,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    // Build optimized filter
+    const filter = { wholesaler: req.user.id };
+    
+    // Date range filter with validation
+    if (startDate || endDate) {
+      filter.saleDate = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        if (!isNaN(start)) filter.saleDate.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        if (!isNaN(end)) filter.saleDate.$lte = end;
+      }
+    }
+    
+    // Customer filter
+    if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+      filter.customerId = customerId;
+    }
+
+    // Status filter
+    if (status && ['pending', 'completed', 'cancelled', 'refunded'].includes(status)) {
+      filter.status = status;
+    }
+
+    // Payment method filter
+    if (paymentMethod && ['cash', 'mobile_money', 'bank_transfer', 'credit', 'card'].includes(paymentMethod)) {
+      filter.paymentMethod = paymentMethod;
+    }
+
+    // Payment status filter
+    if (paymentStatus && ['pending', 'paid', 'partial'].includes(paymentStatus)) {
+      filter.paymentStatus = paymentStatus;
+    }
+
+    // Search filter
+    if (search && typeof search === 'string' && search.trim().length > 0) {
+      filter.$or = [
+        { customerName: { $regex: search.trim(), $options: 'i' } },
+        { customerPhone: { $regex: search.trim(), $options: 'i' } },
+        { referenceNumber: { $regex: search.trim(), $options: 'i' } }
+      ];
+    }
+
+    // Build sort with validation
+    const sort = {};
+    const allowedSortFields = ['createdAt', 'saleDate', 'grandTotal', 'customerName', 'referenceNumber'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    sort[sortField] = sortOrder === 'desc' ? -1 : 1;
+
+    console.log('🔍 Executing ALL sales query with filter:', JSON.stringify(filter));
+
+    // Execute query without limits to get ALL sales
+    const wholesaleSales = await WholesaleSale.find(filter)
+      .sort(sort)
+      .populate('customerId', 'businessName firstName lastName phone email address')
+      .populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder');
+
+    const total = wholesaleSales.length;
+
+    console.log(`✅ Successfully fetched ALL ${total} sales`);
+
+    res.status(200).json({
+      success: true,
+      wholesaleSales,
+      total,
+      message: `Retrieved all ${total} sales`,
+      queryInfo: {
+        filterApplied: Object.keys(filter).length > 1,
+        searchUsed: !!search,
+        unlimited: true
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching ALL wholesale sales:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching all wholesale sales',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/quick/summary - Quick summary for dashboard (ENHANCED to return more sales)
 router.get('/quick/summary', auth, async (req, res) => {
   try {
-    console.log('🚀 Fetching quick sales summary...');
+    console.log('🚀 Fetching enhanced quick sales summary...');
     
     const wholesalerId = req.user.id;
     const today = new Date();
@@ -313,14 +416,16 @@ router.get('/quick/summary', auth, async (req, res) => {
           }
         }
       ]),
-      // Recent sales (limited for performance)
+      // Recent sales (INCREASED LIMIT to return more sales)
       WholesaleSale.find({ 
         wholesaler: wholesalerId,
         status: 'completed'
       })
       .sort({ createdAt: -1 })
-      .limit(10000000000000)
-      .select('referenceNumber customerName grandTotal paymentStatus createdAt')
+      .limit(50) // Increased from 5 to 50
+      .populate('customerId', 'businessName firstName lastName phone')
+      .populate('items.productId', 'name category fromCertifiedOrder')
+      .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items customerId')
       .lean()
     ]);
 
@@ -331,7 +436,7 @@ router.get('/quick/summary', auth, async (req, res) => {
     const revenueTrend = yesterdayRevenue > 0 ? 
       ((todayData.revenue - yesterdayRevenue) / yesterdayRevenue * 100).toFixed(1) : 0;
 
-    console.log('✅ Quick summary generated');
+    console.log(`✅ Enhanced quick summary generated with ${recentSales.length} recent sales`);
 
     res.status(200).json({
       success: true,
@@ -344,13 +449,61 @@ router.get('/quick/summary', auth, async (req, res) => {
         },
         recentSales
       },
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      salesCount: recentSales.length
     });
   } catch (error) {
     console.error('❌ Error fetching quick summary:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching quick summary',
+      error: error.message
+    });
+  }
+});
+
+// GET /api/wholesale-sales/extended/summary - Extended summary with more sales
+router.get('/extended/summary', auth, async (req, res) => {
+  try {
+    console.log('📈 Fetching extended sales summary...');
+    
+    const wholesalerId = req.user.id;
+    const limit = parseInt(req.query.limit) || 100; // Default to 100 sales
+
+    const recentSales = await WholesaleSale.find({ 
+      wholesaler: wholesalerId,
+      status: 'completed'
+    })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .populate('customerId', 'businessName firstName lastName phone email')
+    .populate('items.productId', 'name price measurementUnit category fromCertifiedOrder')
+    .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items customerId subtotal totalDiscount')
+    .lean();
+
+    // Calculate summary statistics
+    const totalRevenue = recentSales.reduce((sum, sale) => sum + (sale.grandTotal || 0), 0);
+    const totalSales = recentSales.length;
+    const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+    console.log(`✅ Extended summary generated with ${recentSales.length} sales`);
+
+    res.status(200).json({
+      success: true,
+      extendedSummary: {
+        totalSales,
+        totalRevenue,
+        averageSale,
+        recentSales
+      },
+      limit,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error fetching extended summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching extended summary',
       error: error.message
     });
   }
@@ -815,7 +968,7 @@ router.post('/', auth, async (req, res) => {
 router.get('/customer/:customerId', auth, async (req, res) => {
   try {
     const customerId = req.params.customerId;
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 50 } = req.query; // Increased limit
 
     console.log(`👤 Fetching sales for customer: ${customerId}`);
     

@@ -124,7 +124,7 @@ router.get('/', auth, async (req, res) => {
     
     const { 
       page = 1, 
-      limit = 1000, // Increased limit to get more sales
+      limit = 1000,
       startDate, 
       endDate, 
       customerId, 
@@ -134,7 +134,8 @@ router.get('/', auth, async (req, res) => {
       search,
       sortBy = 'createdAt',
       sortOrder = 'desc',
-      minimal = 'false'
+      minimal = 'false',
+      includeProfit = 'false'
     } = req.query;
 
     // Build optimized filter
@@ -182,6 +183,11 @@ router.get('/', auth, async (req, res) => {
       ];
     }
 
+    // Select fields based on profit inclusion
+    const selectFields = includeProfit === 'true' 
+      ? 'referenceNumber customerName customerPhone saleDate paymentMethod paymentStatus subtotal totalDiscount grandTotal amountPaid balanceDue totalCost totalProfit totalProfitPercentage status createdAt items'
+      : 'referenceNumber customerName customerPhone saleDate paymentMethod paymentStatus subtotal totalDiscount grandTotal amountPaid balanceDue status createdAt items';
+
     // Optimize population based on minimal flag
     const populateOptions = minimal === 'true' 
       ? [
@@ -190,12 +196,12 @@ router.get('/', auth, async (req, res) => {
         ]
       : [
           { path: 'customerId', select: 'businessName firstName lastName phone email address' },
-          { path: 'items.productId', select: 'name price measurementUnit category images sku fromCertifiedOrder' }
+          { path: 'items.productId', select: 'name price costPrice measurementUnit category images sku fromCertifiedOrder' }
         ];
 
     // Build sort with validation
     const sort = {};
-    const allowedSortFields = ['createdAt', 'saleDate', 'grandTotal', 'customerName', 'referenceNumber'];
+    const allowedSortFields = ['createdAt', 'saleDate', 'grandTotal', 'customerName', 'referenceNumber', 'totalProfit'];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
     sort[sortField] = sortOrder === 'desc' ? -1 : 1;
 
@@ -203,6 +209,7 @@ router.get('/', auth, async (req, res) => {
 
     // Execute query with performance optimization
     const query = WholesaleSale.find(filter)
+      .select(selectFields)
       .sort(sort)
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -240,6 +247,7 @@ router.get('/', auth, async (req, res) => {
         filterApplied: Object.keys(filter).length > 1,
         searchUsed: !!search,
         minimalData: minimal === 'true',
+        includeProfit: includeProfit === 'true',
         limit: parseInt(limit)
       }
     });
@@ -281,7 +289,8 @@ router.get('/all', auth, async (req, res) => {
       paymentStatus,
       search,
       sortBy = 'createdAt',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      includeProfit = 'false'
     } = req.query;
 
     // Build optimized filter
@@ -329,9 +338,14 @@ router.get('/all', auth, async (req, res) => {
       ];
     }
 
+    // Select fields based on profit inclusion
+    const selectFields = includeProfit === 'true' 
+      ? 'referenceNumber customerName customerPhone saleDate paymentMethod paymentStatus subtotal totalDiscount grandTotal amountPaid balanceDue totalCost totalProfit totalProfitPercentage status createdAt items'
+      : 'referenceNumber customerName customerPhone saleDate paymentMethod paymentStatus subtotal totalDiscount grandTotal amountPaid balanceDue status createdAt items';
+
     // Build sort with validation
     const sort = {};
-    const allowedSortFields = ['createdAt', 'saleDate', 'grandTotal', 'customerName', 'referenceNumber'];
+    const allowedSortFields = ['createdAt', 'saleDate', 'grandTotal', 'customerName', 'referenceNumber', 'totalProfit'];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
     sort[sortField] = sortOrder === 'desc' ? -1 : 1;
 
@@ -339,9 +353,10 @@ router.get('/all', auth, async (req, res) => {
 
     // Execute query without limits to get ALL sales
     const wholesaleSales = await WholesaleSale.find(filter)
+      .select(selectFields)
       .sort(sort)
       .populate('customerId', 'businessName firstName lastName phone email address')
-      .populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder');
+      .populate('items.productId', 'name price costPrice measurementUnit category images sku fromCertifiedOrder');
 
     const total = wholesaleSales.length;
 
@@ -355,6 +370,7 @@ router.get('/all', auth, async (req, res) => {
       queryInfo: {
         filterApplied: Object.keys(filter).length > 1,
         searchUsed: !!search,
+        includeProfit: includeProfit === 'true',
         unlimited: true
       }
     });
@@ -382,7 +398,7 @@ router.get('/quick/summary', auth, async (req, res) => {
 
     // Parallel execution for performance
     const [todayStats, yesterdayStats, recentSales] = await Promise.all([
-      // Today's sales
+      // Today's sales with profit data
       WholesaleSale.aggregate([
         {
           $match: {
@@ -396,6 +412,8 @@ router.get('/quick/summary', auth, async (req, res) => {
             _id: null,
             count: { $sum: 1 },
             revenue: { $sum: '$grandTotal' },
+            cost: { $sum: '$totalCost' },
+            profit: { $sum: '$totalProfit' },
             itemsSold: { $sum: { $size: '$items' } }
           }
         }
@@ -412,29 +430,33 @@ router.get('/quick/summary', auth, async (req, res) => {
         {
           $group: {
             _id: null,
-            revenue: { $sum: '$grandTotal' }
+            revenue: { $sum: '$grandTotal' },
+            profit: { $sum: '$totalProfit' }
           }
         }
       ]),
-      // Recent sales (INCREASED LIMIT to return more sales)
+      // Recent sales with profit data
       WholesaleSale.find({ 
         wholesaler: wholesalerId,
         status: 'completed'
       })
       .sort({ createdAt: -1 })
-      .limit(9000000000000000000000000000000) // Increased from 5 to 50
+      .limit(50)
       .populate('customerId', 'businessName firstName lastName phone')
       .populate('items.productId', 'name category fromCertifiedOrder')
-      .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items customerId')
+      .select('referenceNumber customerName grandTotal totalCost totalProfit paymentStatus paymentMethod createdAt items customerId')
       .lean()
     ]);
 
-    const todayData = todayStats[0] || { count: 0, revenue: 0, itemsSold: 0 };
+    const todayData = todayStats[0] || { count: 0, revenue: 0, cost: 0, profit: 0, itemsSold: 0 };
     const yesterdayRevenue = yesterdayStats[0]?.revenue || 0;
+    const yesterdayProfit = yesterdayStats[0]?.profit || 0;
     
-    // Calculate trend
+    // Calculate trends
     const revenueTrend = yesterdayRevenue > 0 ? 
       ((todayData.revenue - yesterdayRevenue) / yesterdayRevenue * 100).toFixed(1) : 0;
+    const profitTrend = yesterdayProfit > 0 ? 
+      ((todayData.profit - yesterdayProfit) / yesterdayProfit * 100).toFixed(1) : 0;
 
     console.log(`✅ Enhanced quick summary generated with ${recentSales.length} recent sales`);
 
@@ -444,8 +466,11 @@ router.get('/quick/summary', auth, async (req, res) => {
         today: {
           sales: todayData.count,
           revenue: todayData.revenue,
+          cost: todayData.cost,
+          profit: todayData.profit,
           itemsSold: todayData.itemsSold,
-          revenueTrend: parseFloat(revenueTrend)
+          revenueTrend: parseFloat(revenueTrend),
+          profitTrend: parseFloat(profitTrend)
         },
         recentSales
       },
@@ -468,7 +493,7 @@ router.get('/extended/summary', auth, async (req, res) => {
     console.log('📈 Fetching extended sales summary...');
     
     const wholesalerId = req.user.id;
-    const limit = parseInt(req.query.limit) || 100; // Default to 100 sales
+    const limit = parseInt(req.query.limit) || 100;
 
     const recentSales = await WholesaleSale.find({ 
       wholesaler: wholesalerId,
@@ -477,14 +502,18 @@ router.get('/extended/summary', auth, async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(limit)
     .populate('customerId', 'businessName firstName lastName phone email')
-    .populate('items.productId', 'name price measurementUnit category fromCertifiedOrder')
-    .select('referenceNumber customerName grandTotal paymentStatus paymentMethod createdAt items customerId subtotal totalDiscount')
+    .populate('items.productId', 'name price costPrice measurementUnit category fromCertifiedOrder')
+    .select('referenceNumber customerName grandTotal totalCost totalProfit paymentStatus paymentMethod createdAt items customerId subtotal totalDiscount')
     .lean();
 
-    // Calculate summary statistics
+    // Calculate summary statistics with profit data
     const totalRevenue = recentSales.reduce((sum, sale) => sum + (sale.grandTotal || 0), 0);
+    const totalCost = recentSales.reduce((sum, sale) => sum + (sale.totalCost || 0), 0);
+    const totalProfit = recentSales.reduce((sum, sale) => sum + (sale.totalProfit || 0), 0);
     const totalSales = recentSales.length;
     const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
+    const averageProfit = totalSales > 0 ? totalProfit / totalSales : 0;
+    const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
     console.log(`✅ Extended summary generated with ${recentSales.length} sales`);
 
@@ -493,7 +522,11 @@ router.get('/extended/summary', auth, async (req, res) => {
       extendedSummary: {
         totalSales,
         totalRevenue,
+        totalCost,
+        totalProfit,
         averageSale,
+        averageProfit,
+        profitMargin: parseFloat(profitMargin.toFixed(2)),
         recentSales
       },
       limit,
@@ -509,7 +542,7 @@ router.get('/extended/summary', auth, async (req, res) => {
   }
 });
 
-// GET /api/wholesale-sales/statistics/overview - Enhanced statistics
+// GET /api/wholesale-sales/statistics/overview - Enhanced statistics with profit data
 router.get('/statistics/overview', auth, async (req, res) => {
   try {
     const { timeframe = 'month' } = req.query;
@@ -549,7 +582,8 @@ router.get('/statistics/overview', auth, async (req, res) => {
       statistics,
       paymentMethodStats,
       topProducts,
-      certifiedStats
+      certifiedStats,
+      profitStats
     ] = await Promise.all([
       // Main statistics
       WholesaleSale.aggregate([
@@ -576,11 +610,12 @@ router.get('/statistics/overview', auth, async (req, res) => {
           $group: {
             _id: '$paymentMethod',
             count: { $sum: 1 },
-            totalAmount: { $sum: '$grandTotal' }
+            totalAmount: { $sum: '$grandTotal' },
+            totalProfit: { $sum: '$totalProfit' }
           }
         }
       ]),
-      // Top products
+      // Top products with profit data
       WholesaleSale.aggregate([
         { $match: matchStage },
         { $unwind: '$items' },
@@ -590,10 +625,25 @@ router.get('/statistics/overview', auth, async (req, res) => {
             productName: { $first: '$items.productName' },
             totalQuantity: { $sum: '$items.quantity' },
             totalRevenue: { $sum: '$items.total' },
-            averagePrice: { $avg: '$items.unitPrice' }
+            totalCost: { $sum: { $multiply: ['$items.costPrice', '$items.quantity'] } },
+            totalProfit: { $sum: '$items.profit' },
+            averagePrice: { $avg: '$items.unitPrice' },
+            averageCost: { $avg: '$items.costPrice' },
+            isCertifiedProduct: { $first: '$items.isCertifiedProduct' }
           }
         },
-        { $sort: { totalQuantity: -1 } },
+        {
+          $addFields: {
+            profitMargin: {
+              $cond: {
+                if: { $gt: ['$totalRevenue', 0] },
+                then: { $multiply: [{ $divide: ['$totalProfit', '$totalRevenue'] }, 100] },
+                else: 0
+              }
+            }
+          }
+        },
+        { $sort: { totalProfit: -1 } },
         { $limit: 10 }
       ]),
       // Certified products statistics
@@ -610,7 +660,24 @@ router.get('/statistics/overview', auth, async (req, res) => {
             _id: null,
             totalCertifiedSales: { $sum: 1 },
             totalCertifiedRevenue: { $sum: '$items.total' },
+            totalCertifiedCost: { $sum: { $multiply: ['$items.costPrice', '$items.quantity'] } },
+            totalCertifiedProfit: { $sum: '$items.profit' },
             totalCertifiedItems: { $sum: '$items.quantity' }
+          }
+        }
+      ]),
+      // Profit statistics
+      WholesaleSale.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: null,
+            totalCost: { $sum: '$totalCost' },
+            totalProfit: { $sum: '$totalProfit' },
+            averageProfit: { $avg: '$totalProfit' },
+            maxProfit: { $max: '$totalProfit' },
+            minProfit: { $min: '$totalProfit' },
+            averageProfitPercentage: { $avg: '$totalProfitPercentage' }
           }
         }
       ])
@@ -631,16 +698,33 @@ router.get('/statistics/overview', auth, async (req, res) => {
     const certifiedData = certifiedStats[0] || {
       totalCertifiedSales: 0,
       totalCertifiedRevenue: 0,
+      totalCertifiedCost: 0,
+      totalCertifiedProfit: 0,
       totalCertifiedItems: 0
     };
 
-    console.log(`✅ Statistics calculated: ${stats.totalSales} sales, ${stats.totalRevenue} revenue`);
+    const profitData = profitStats[0] || {
+      totalCost: 0,
+      totalProfit: 0,
+      averageProfit: 0,
+      maxProfit: 0,
+      minProfit: 0,
+      averageProfitPercentage: 0
+    };
+
+    // Calculate overall profit margin
+    const overallProfitMargin = stats.totalRevenue > 0 ? 
+      (profitData.totalProfit / stats.totalRevenue) * 100 : 0;
+
+    console.log(`✅ Statistics calculated: ${stats.totalSales} sales, $${stats.totalRevenue} revenue, $${profitData.totalProfit} profit`);
 
     res.status(200).json({
       success: true,
       statistics: {
         ...stats,
         ...certifiedData,
+        ...profitData,
+        overallProfitMargin: parseFloat(overallProfitMargin.toFixed(2)),
         timeframe: timeframe,
         paymentMethodStats,
         topProducts
@@ -656,10 +740,133 @@ router.get('/statistics/overview', auth, async (req, res) => {
   }
 });
 
+// GET /api/wholesale-sales/profit/analysis - Detailed profit analysis
+router.get('/profit/analysis', auth, async (req, res) => {
+  try {
+    const { timeframe = 'month', groupBy = 'day' } = req.query;
+    const wholesalerId = req.user.id;
+
+    console.log(`💰 Fetching profit analysis for timeframe: ${timeframe}`);
+
+    // Calculate date range
+    const now = new Date();
+    let startDate = new Date();
+
+    switch (timeframe) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'year':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+      default:
+        startDate = new Date(0);
+    }
+
+    const matchStage = {
+      wholesaler: wholesalerId,
+      status: 'completed',
+      createdAt: { $gte: startDate }
+    };
+
+    // Get profit statistics using model method
+    const profitStats = await WholesaleSale.getProfitStatistics(wholesalerId, timeframe);
+    const productProfitAnalysis = await WholesaleSale.getProductProfitAnalysis(wholesalerId, timeframe);
+
+    // Get daily/weekly/monthly profit trends
+    let groupStage = {};
+    switch (groupBy) {
+      case 'week':
+        groupStage = {
+          year: { $year: '$saleDate' },
+          week: { $week: '$saleDate' }
+        };
+        break;
+      case 'month':
+        groupStage = {
+          year: { $year: '$saleDate' },
+          month: { $month: '$saleDate' }
+        };
+        break;
+      default: // day
+        groupStage = {
+          year: { $year: '$saleDate' },
+          month: { $month: '$saleDate' },
+          day: { $dayOfMonth: '$saleDate' }
+        };
+    }
+
+    const profitTrends = await WholesaleSale.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: groupStage,
+          date: { $first: '$saleDate' },
+          salesCount: { $sum: 1 },
+          totalRevenue: { $sum: '$grandTotal' },
+          totalCost: { $sum: '$totalCost' },
+          totalProfit: { $sum: '$totalProfit' },
+          averageProfitMargin: { $avg: '$totalProfitPercentage' }
+        }
+      },
+      {
+        $addFields: {
+          profitMargin: {
+            $cond: {
+              if: { $gt: ['$totalRevenue', 0] },
+              then: { $multiply: [{ $divide: ['$totalProfit', '$totalRevenue'] }, 100] },
+              else: 0
+            }
+          }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
+      { $limit: 30 }
+    ]);
+
+    const stats = profitStats[0] || {
+      totalSales: 0,
+      totalRevenue: 0,
+      totalCost: 0,
+      totalProfit: 0,
+      averageProfitMargin: 0,
+      averageProfitPercentage: 0,
+      mostProfitableSale: 0,
+      leastProfitableSale: 0
+    };
+
+    console.log(`✅ Profit analysis completed: $${stats.totalProfit} total profit`);
+
+    res.status(200).json({
+      success: true,
+      profitAnalysis: {
+        summary: stats,
+        productAnalysis: productProfitAnalysis,
+        trends: profitTrends,
+        timeframe,
+        groupBy
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching profit analysis:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profit analysis',
+      error: error.message
+    });
+  }
+});
+
 // GET /api/wholesale-sales/batch/dates - Get sales by date ranges (for charts)
 router.get('/batch/dates', auth, async (req, res) => {
   try {
-    const { groupBy = 'day', limit = 30 } = req.query; // day, week, month
+    const { groupBy = 'day', limit = 30, includeProfit = 'false' } = req.query;
     const wholesalerId = req.user.id;
 
     console.log(`📅 Fetching sales data grouped by: ${groupBy}`);
@@ -686,6 +893,21 @@ router.get('/batch/dates', auth, async (req, res) => {
         };
     }
 
+    const groupFields = {
+      _id: groupStage,
+      date: { $first: '$saleDate' },
+      salesCount: { $sum: 1 },
+      totalRevenue: { $sum: '$grandTotal' },
+      averageSale: { $avg: '$grandTotal' }
+    };
+
+    // Add profit fields if requested
+    if (includeProfit === 'true') {
+      groupFields.totalCost = { $sum: '$totalCost' };
+      groupFields.totalProfit = { $sum: '$totalProfit' };
+      groupFields.averageProfitMargin = { $avg: '$totalProfitPercentage' };
+    }
+
     const salesByDate = await WholesaleSale.aggregate([
       {
         $match: {
@@ -695,13 +917,7 @@ router.get('/batch/dates', auth, async (req, res) => {
         }
       },
       {
-        $group: {
-          _id: groupStage,
-          date: { $first: '$saleDate' },
-          salesCount: { $sum: 1 },
-          totalRevenue: { $sum: '$grandTotal' },
-          averageSale: { $avg: '$grandTotal' }
-        }
+        $group: groupFields
       },
       { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
       { $limit: parseInt(limit) }
@@ -713,6 +929,7 @@ router.get('/batch/dates', auth, async (req, res) => {
       success: true,
       salesByDate,
       groupBy,
+      includeProfit: includeProfit === 'true',
       limit: parseInt(limit)
     });
   } catch (error) {
@@ -727,7 +944,7 @@ router.get('/batch/dates', auth, async (req, res) => {
 
 // ==================== SINGLE SALE OPERATIONS ====================
 
-// GET /api/wholesale-sales/:id - Get single sale with full details
+// GET /api/wholesale-sales/:id - Get single sale with full details including profit data
 router.get('/:id', auth, async (req, res) => {
   try {
     const saleId = req.params.id;
@@ -771,7 +988,7 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// POST /api/wholesale-sales - Create new wholesale sale
+// POST /api/wholesale-sales - Create new wholesale sale with cost price and profit tracking
 router.post('/', auth, async (req, res) => {
   try {
     console.log('🎯 Creating new wholesale sale...');
@@ -793,7 +1010,9 @@ router.post('/', auth, async (req, res) => {
       amountPaid,
       balanceDue,
       referenceNumber,
-      isWalkInCustomer = false
+      isWalkInCustomer = false,
+      operationMode = 'online',
+      syncStatus = 'synced'
     } = req.body;
 
     // Validate required fields
@@ -864,7 +1083,7 @@ router.post('/', auth, async (req, res) => {
       };
     }
 
-    // Validate products and quantities
+    // Validate products and quantities with cost price validation
     const productUpdates = [];
     for (const item of items) {
       let product = await Product.findOne({
@@ -889,10 +1108,32 @@ router.post('/', auth, async (req, res) => {
         });
       }
 
+      // Validate cost price exists
+      if (!item.costPrice && item.costPrice !== 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Cost price is required for ${product.name}`,
+          productId: product._id,
+          productName: product.name
+        });
+      }
+
       if (product.quantity < item.quantity) {
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${product.name}. Available: ${product.quantity}, Requested: ${item.quantity}`
+        });
+      }
+
+      // Validate certified product pricing
+      if (product.fromCertifiedOrder && item.unitPrice < item.costPrice) {
+        return res.status(400).json({
+          success: false,
+          message: `Certified product "${product.name}" selling price cannot be less than cost price ($${item.costPrice})`,
+          productId: product._id,
+          productName: product.name,
+          costPrice: item.costPrice,
+          sellingPrice: item.unitPrice
         });
       }
 
@@ -906,7 +1147,7 @@ router.post('/', auth, async (req, res) => {
       await product.save();
     }
 
-    // Create sale record
+    // Create sale record with cost price and profit data
     const saleData = {
       customerType: finalCustomerType,
       customerId: finalCustomerId,
@@ -920,17 +1161,29 @@ router.post('/', auth, async (req, res) => {
       saleNotes,
       items: items.map(item => ({
         ...item,
+        // Ensure all item fields are properly formatted including cost price and profit
+        productId: item.productId,
+        productName: item.productName,
         quantity: parseFloat(item.quantity),
         unitPrice: parseFloat(item.unitPrice),
+        costPrice: parseFloat(item.costPrice) || 0,
         discount: parseFloat(item.discount) || 0,
-        total: parseFloat(item.total) || 0
+        total: parseFloat(item.total) || 0,
+        profit: parseFloat(item.profit) || 0,
+        isCertifiedProduct: item.isCertifiedProduct || false,
+        profitMargin: parseFloat(item.profitMargin) || 0,
+        profitPercentage: parseFloat(item.profitPercentage) || 0
       })),
       subtotal: parseFloat(subtotal) || 0,
       totalDiscount: parseFloat(totalDiscount) || 0,
       grandTotal: parseFloat(grandTotal) || 0,
       amountPaid: parseFloat(amountPaid) || 0,
       balanceDue: parseFloat(balanceDue) || 0,
-      wholesaler: req.user.id
+      totalCost: parseFloat(items.reduce((sum, item) => sum + (item.costPrice * item.quantity), 0)) || 0,
+      totalProfit: parseFloat(items.reduce((sum, item) => sum + (item.profit || 0), 0)) || 0,
+      wholesaler: req.user.id,
+      operationMode,
+      syncStatus
     };
 
     const wholesaleSale = new WholesaleSale(saleData);
@@ -938,7 +1191,7 @@ router.post('/', auth, async (req, res) => {
 
     // Populate for response
     await wholesaleSale.populate('customerId', 'businessName firstName lastName phone email address');
-    await wholesaleSale.populate('items.productId', 'name price measurementUnit category images sku fromCertifiedOrder');
+    await wholesaleSale.populate('items.productId', 'name price costPrice measurementUnit category images sku fromCertifiedOrder');
 
     const saleWithCustomerDetails = {
       ...wholesaleSale.toObject(),
@@ -946,11 +1199,21 @@ router.post('/', auth, async (req, res) => {
     };
 
     console.log('✅ Sale created successfully:', wholesaleSale.referenceNumber);
+    console.log('💰 Profit Summary:', {
+      totalCost: wholesaleSale.totalCost,
+      totalProfit: wholesaleSale.totalProfit,
+      profitPercentage: wholesaleSale.totalProfitPercentage
+    });
 
     res.status(201).json({
       success: true,
       message: 'Wholesale sale created successfully',
-      wholesaleSale: saleWithCustomerDetails
+      wholesaleSale: saleWithCustomerDetails,
+      profitSummary: {
+        totalCost: wholesaleSale.totalCost,
+        totalProfit: wholesaleSale.totalProfit,
+        profitPercentage: wholesaleSale.totalProfitPercentage
+      }
     });
   } catch (error) {
     console.error('❌ Error creating wholesale sale:', error);
@@ -968,10 +1231,14 @@ router.post('/', auth, async (req, res) => {
 router.get('/customer/:customerId', auth, async (req, res) => {
   try {
     const customerId = req.params.customerId;
-    const { page = 1, limit = 50 } = req.query; // Increased limit
+    const { page = 1, limit = 50, includeProfit = 'false' } = req.query;
 
     console.log(`👤 Fetching sales for customer: ${customerId}`);
     
+    const selectFields = includeProfit === 'true' 
+      ? 'referenceNumber customerName saleDate paymentMethod paymentStatus grandTotal totalCost totalProfit status createdAt items'
+      : 'referenceNumber customerName saleDate paymentMethod paymentStatus grandTotal status createdAt items';
+
     const wholesaleSales = await WholesaleSale.find({
       wholesaler: req.user.id,
       $or: [
@@ -979,8 +1246,9 @@ router.get('/customer/:customerId', auth, async (req, res) => {
         { 'customerInfo.phone': customerId }
       ]
     })
+    .select(selectFields)
     .sort({ createdAt: -1 })
-    .populate('items.productId', 'name price measurementUnit category images fromCertifiedOrder')
+    .populate('items.productId', 'name price costPrice measurementUnit category images fromCertifiedOrder')
     .limit(limit * 1)
     .skip((page - 1) * limit);
 
@@ -1004,7 +1272,8 @@ router.get('/customer/:customerId', auth, async (req, res) => {
       wholesaleSales: salesWithCustomerDetails,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
-      total
+      total,
+      includeProfit: includeProfit === 'true'
     });
   } catch (error) {
     console.error('❌ Error fetching customer sales:', error);
@@ -1034,7 +1303,7 @@ router.put('/:id', auth, async (req, res) => {
       });
     }
 
-    const allowedUpdates = ['paymentStatus', 'amountPaid', 'balanceDue', 'saleNotes', 'status'];
+    const allowedUpdates = ['paymentStatus', 'amountPaid', 'balanceDue', 'saleNotes', 'status', 'syncStatus'];
     const updates = {};
     
     allowedUpdates.forEach(field => {
@@ -1049,7 +1318,7 @@ router.put('/:id', auth, async (req, res) => {
       { new: true, runValidators: true }
     )
     .populate('customerId', 'businessName firstName lastName phone email address')
-    .populate('items.productId', 'name price measurementUnit category images fromCertifiedOrder');
+    .populate('items.productId', 'name price costPrice measurementUnit category images fromCertifiedOrder');
 
     const saleWithCustomerDetails = {
       ...updatedSale.toObject(),
@@ -1068,6 +1337,63 @@ router.put('/:id', auth, async (req, res) => {
     res.status(400).json({
       success: false,
       message: 'Error updating wholesale sale',
+      error: error.message
+    });
+  }
+});
+
+// PUT /api/wholesale-sales/:id/recalculate-profits - Recalculate profit metrics for a sale
+router.put('/:id/recalculate-profits', auth, async (req, res) => {
+  try {
+    const saleId = req.params.id;
+    console.log(`🧮 Recalculating profits for sale: ${saleId}`);
+
+    const wholesaleSale = await WholesaleSale.findOne({
+      _id: saleId,
+      wholesaler: req.user.id
+    });
+
+    if (!wholesaleSale) {
+      return res.status(404).json({
+        success: false,
+        message: 'Wholesale sale not found'
+      });
+    }
+
+    // Recalculate profits using the model method
+    await wholesaleSale.recalculateProfits();
+
+    // Repopulate for response
+    await wholesaleSale.populate('customerId', 'businessName firstName lastName phone email address');
+    await wholesaleSale.populate('items.productId', 'name price costPrice measurementUnit category images fromCertifiedOrder');
+
+    const saleWithCustomerDetails = {
+      ...wholesaleSale.toObject(),
+      customerDetails: wholesaleSale.customerDetails
+    };
+
+    console.log(`✅ Profits recalculated for sale: ${saleId}`);
+    console.log('💰 Updated Profit Summary:', {
+      totalCost: wholesaleSale.totalCost,
+      totalProfit: wholesaleSale.totalProfit,
+      profitPercentage: wholesaleSale.totalProfitPercentage
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Profit metrics recalculated successfully',
+      wholesaleSale: saleWithCustomerDetails,
+      profitSummary: {
+        totalCost: wholesaleSale.totalCost,
+        totalProfit: wholesaleSale.totalProfit,
+        profitPercentage: wholesaleSale.totalProfitPercentage
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error recalculating profits:', error);
+    res.status(400).json({
+      success: false,
+      message: 'Error recalculating profit metrics',
       error: error.message
     });
   }
@@ -1124,10 +1450,10 @@ router.delete('/:id', auth, async (req, res) => {
 
 // ==================== EXPORT ROUTES ====================
 
-// GET /api/wholesale-sales/export/csv - Export sales as CSV
+// GET /api/wholesale-sales/export/csv - Export sales as CSV with profit data
 router.get('/export/csv', auth, async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, includeProfit = 'false' } = req.query;
     
     const filter = { wholesaler: req.user.id };
     
@@ -1139,19 +1465,38 @@ router.get('/export/csv', auth, async (req, res) => {
 
     const sales = await WholesaleSale.find(filter)
       .populate('customerId', 'businessName phone')
-      .populate('items.productId', 'name sku')
+      .populate('items.productId', 'name sku costPrice')
       .sort({ saleDate: -1 });
 
-    let csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Unit Price,Total,Payment Method,Payment Status\n';
+    let csv = '';
     
-    sales.forEach(sale => {
-      sale.items.forEach(item => {
-        csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.unitPrice},${item.total},"${sale.paymentMethod}","${sale.paymentStatus}"\n`;
+    if (includeProfit === 'true') {
+      // CSV with profit data
+      csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Cost Price,Unit Price,Total,Profit,Profit Margin %,Payment Method,Payment Status\n';
+      
+      sales.forEach(sale => {
+        sale.items.forEach(item => {
+          const profitMargin = item.costPrice > 0 ? ((item.unitPrice - item.costPrice) / item.costPrice * 100).toFixed(2) : '0';
+          csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.costPrice},${item.unitPrice},${item.total},${item.profit},${profitMargin},"${sale.paymentMethod}","${sale.paymentStatus}"\n`;
+        });
       });
-    });
+    } else {
+      // Basic CSV without profit data
+      csv = 'Reference Number,Date,Customer,Phone,Product,Quantity,Unit Price,Total,Payment Method,Payment Status\n';
+      
+      sales.forEach(sale => {
+        sale.items.forEach(item => {
+          csv += `"${sale.referenceNumber}","${sale.saleDate.toISOString().split('T')[0]}","${sale.customerName}","${sale.customerPhone}","${item.productName}",${item.quantity},${item.unitPrice},${item.total},"${sale.paymentMethod}","${sale.paymentStatus}"\n`;
+        });
+      });
+    }
+
+    const filename = includeProfit === 'true' 
+      ? `sales-with-profit-export-${new Date().toISOString().split('T')[0]}.csv`
+      : `sales-export-${new Date().toISOString().split('T')[0]}.csv`;
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=sales-export-${new Date().toISOString().split('T')[0]}.csv`);
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
     res.send(csv);
     
   } catch (error) {

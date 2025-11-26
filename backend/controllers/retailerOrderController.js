@@ -1638,7 +1638,7 @@ exports.getRetailerOrders = async (req, res) => {
 // Enhanced get orders for wholesaler with business analytics
 
 
-// Enhanced get orders for wholesaler with business analytics - FIXED VERSION
+// FIXED VERSION - Replace the entire getWholesalerOrders function
 exports.getWholesalerOrders = async (req, res) => {
   try {
     const { 
@@ -1649,177 +1649,68 @@ exports.getWholesalerOrders = async (req, res) => {
       sortOrder = 'desc',
       retailerId,
       productId,
-      timeRange = 'all' // today, week, month, year, all
+      timeRange = 'all'
     } = req.query;
     
-    // FIX: Initialize filter with proper structure
+    console.log('🔄 Fetching wholesaler orders for user:', req.user.id);
+    
+    // SIMPLE FIX: Use a basic filter without complex date logic
     const filter = { 
       wholesaler: req.user.id 
     };
     
-    console.log('🔄 Fetching wholesaler orders with filter:', {
-      wholesalerId: req.user.id,
-      status,
-      timeRange,
-      retailerId,
-      productId
-    });
-
-    // FIX: Add status filter safely
+    // Add status filter if provided
     if (status && status !== 'all') {
       filter.status = status;
     }
 
-    // FIX: Add retailer filter safely
+    // Add retailer filter if provided
     if (retailerId) {
       filter.retailer = retailerId;
     }
 
-    // FIX: Add product filter safely
+    // Add product filter if provided
     if (productId) {
       filter.product = productId;
     }
 
-    // FIX: Enhanced time range filter with proper date handling
-    if (timeRange !== 'all') {
-      const startDate = new Date(); // Create a new date object each time
-      
-      switch (timeRange) {
-        case 'today':
-          startDate.setHours(0, 0, 0, 0);
-          filter.createdAt = { $gte: startDate };
-          break;
-        case 'week':
-          startDate.setDate(startDate.getDate() - 7);
-          filter.createdAt = { $gte: startDate };
-          break;
-        case 'month':
-          startDate.setMonth(startDate.getMonth() - 1);
-          filter.createdAt = { $gte: startDate };
-          break;
-        case 'year':
-          startDate.setFullYear(startDate.getFullYear() - 1);
-          filter.createdAt = { $gte: startDate };
-          break;
-        default:
-          // No filter for unknown time ranges
-          break;
-      }
-    }
+    console.log('🔍 Using filter:', filter);
 
-    console.log('🔍 Final filter for query:', filter);
-
-    // FIX: Build sort options safely
+    // Build sort options
     const sortOptions = {};
-    if (sortBy) {
-      sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
-    } else {
-      sortOptions.createdAt = -1; // Default sort
-    }
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-    // FIX: Calculate skip and limit values safely
+    // Calculate pagination
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 10;
     const skip = (pageNum - 1) * limitNum;
 
-    console.log('📋 Query parameters:', {
-      page: pageNum,
-      limit: limitNum,
-      skip,
-      sortOptions
-    });
-
-    // FIX: Enhanced population with error handling
+    // SIMPLE QUERY: Remove complex population that might cause issues
     const orders = await RetailerOrder.find(filter)
-      .populate([
-        { 
-          path: 'product', 
-          select: 'name description images measurementUnit category sku'
-        },
-        { 
-          path: 'retailer', 
-          select: 'firstName lastName businessName phone email address'
-        },
-        { 
-          path: 'transporter', 
-          select: 'firstName lastName businessName phone email'
-        },
-        { 
-          path: 'cancellationDetails.cancelledBy', 
-          select: 'firstName lastName businessName'
-        },
-        { 
-          path: 'deliveryDispute.disputedBy', 
-          select: 'firstName lastName businessName'
-        },
-        { 
-          path: 'returnDetails.returnedBy', 
-          select: 'firstName lastName businessName'
-        },
-        { 
-          path: 'assignmentHistory.transporter', 
-          select: 'firstName lastName businessName'
-        }
-      ])
+      .populate('product', 'name description images measurementUnit category')
+      .populate('retailer', 'firstName lastName businessName phone email')
       .sort(sortOptions)
       .limit(limitNum)
       .skip(skip);
 
+    const total = await RetailerOrder.countDocuments(filter);
+
     console.log(`✅ Found ${orders.length} orders for wholesaler ${req.user.id}`);
 
-    // FIX: Safe count operation
-    const total = await RetailerOrder.countDocuments(filter).catch(err => {
-      console.error('Error counting documents:', err);
-      return 0;
-    });
-
-    // FIX: Enhanced analytics with error handling
-    let analytics = [];
-    try {
-      analytics = await RetailerOrder.aggregate([
-        { $match: filter },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 },
-            totalRevenue: { $sum: '$totalPrice' },
-            averageValue: { $avg: '$totalPrice' }
-          }
-        }
-      ]);
-    } catch (aggError) {
-      console.error('Error in analytics aggregation:', aggError);
-      analytics = [];
-    }
-
-    // FIX: Enhanced response with proper data structure
-    const response = {
+    // SIMPLE RESPONSE: Remove analytics aggregation that might fail
+    res.status(200).json({
       success: true,
       orders: orders || [],
       totalPages: Math.ceil(total / limitNum),
       currentPage: pageNum,
       total: total,
-      analytics: analytics,
       filters: {
         status,
         timeRange,
         retailerId,
         productId
-      },
-      metadata: {
-        wholesalerId: req.user.id,
-        fetchedAt: new Date(),
-        orderCount: orders.length
       }
-    };
-
-    console.log('📤 Sending response with orders:', {
-      orderCount: orders.length,
-      totalPages: response.totalPages,
-      currentPage: response.currentPage
     });
-
-    res.status(200).json(response);
 
   } catch (error) {
     console.error('❌ Get wholesaler orders error:', error);
@@ -1827,8 +1718,7 @@ exports.getWholesalerOrders = async (req, res) => {
       success: false,
       message: 'Server error while fetching orders',
       error: error.message,
-      timestamp: new Date(),
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      timestamp: new Date()
     });
   }
 };

@@ -1638,91 +1638,67 @@ exports.getRetailerOrders = async (req, res) => {
 // Enhanced get orders for wholesaler with business analytics
 
 
-// FIXED VERSION - Replace the entire getWholesalerOrders function
+// ULTRA-SIMPLE DEBUG VERSION - Replace the entire getWholesalerOrders function
 exports.getWholesalerOrders = async (req, res) => {
+  console.log('🔄 DEBUG: getWholesalerOrders called');
+  console.log('🔍 DEBUG: User ID:', req.user?.id);
+  console.log('🔍 DEBUG: User Role:', req.user?.role);
+  console.log('🔍 DEBUG: Query params:', req.query);
+  
   try {
-    const { 
-      status, 
-      page = 1, 
-      limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-      retailerId,
-      productId,
-      timeRange = 'all'
-    } = req.query;
-    
-    console.log('🔄 Fetching wholesaler orders for user:', req.user.id);
-    
-    // SIMPLE FIX: Use a basic filter without complex date logic
+    // Basic validation
+    if (!req.user || !req.user.id) {
+      console.log('❌ DEBUG: No user in request');
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
+    // SIMPLEST POSSIBLE FILTER
     const filter = { 
       wholesaler: req.user.id 
     };
     
-    // Add status filter if provided
-    if (status && status !== 'all') {
-      filter.status = status;
-    }
+    console.log('🔍 DEBUG: Using filter:', filter);
 
-    // Add retailer filter if provided
-    if (retailerId) {
-      filter.retailer = retailerId;
-    }
+    // SIMPLEST POSSIBLE QUERY - no population, no sorting, no pagination
+    const orders = await RetailerOrder.find(filter).lean();
+    
+    console.log(`✅ DEBUG: Found ${orders.length} raw orders`);
 
-    // Add product filter if provided
-    if (productId) {
-      filter.product = productId;
-    }
-
-    console.log('🔍 Using filter:', filter);
-
-    // Build sort options
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-    // Calculate pagination
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 10;
-    const skip = (pageNum - 1) * limitNum;
-
-    // SIMPLE QUERY: Remove complex population that might cause issues
-    const orders = await RetailerOrder.find(filter)
-      .populate('product', 'name description images measurementUnit category')
-      .populate('retailer', 'firstName lastName businessName phone email')
-      .sort(sortOptions)
-      .limit(limitNum)
-      .skip(skip);
-
-    const total = await RetailerOrder.countDocuments(filter);
-
-    console.log(`✅ Found ${orders.length} orders for wholesaler ${req.user.id}`);
-
-    // SIMPLE RESPONSE: Remove analytics aggregation that might fail
-    res.status(200).json({
+    // SIMPLEST POSSIBLE RESPONSE
+    const response = {
       success: true,
       orders: orders || [],
-      totalPages: Math.ceil(total / limitNum),
-      currentPage: pageNum,
-      total: total,
-      filters: {
-        status,
-        timeRange,
-        retailerId,
-        productId
+      total: orders.length,
+      message: `Found ${orders.length} orders`,
+      debug: {
+        userId: req.user.id,
+        queryTime: new Date().toISOString(),
+        rawCount: orders.length
       }
-    });
+    };
+
+    console.log('✅ DEBUG: Sending successful response');
+    res.status(200).json(response);
 
   } catch (error) {
-    console.error('❌ Get wholesaler orders error:', error);
+    console.error('❌ DEBUG: CATCH BLOCK ERROR:', error);
+    console.error('❌ DEBUG: Error stack:', error.stack);
+    
+    // Detailed error response
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching orders',
+      message: 'Server error in getWholesalerOrders',
       error: error.message,
-      timestamp: new Date()
+      stack: error.stack,
+      userId: req.user?.id,
+      timestamp: new Date().toISOString(),
+      endpoint: 'GET /api/retailer-orders/wholesaler'
     });
   }
 };
-
 
 // Enhanced get orders for transporter with assignment tracking
 exports.getTransporterOrders = async (req, res) => {

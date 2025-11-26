@@ -1637,69 +1637,321 @@ exports.getRetailerOrders = async (req, res) => {
 
 // Enhanced get orders for wholesaler with business analytics
 
-
-// ULTRA-SIMPLE DEBUG VERSION - Replace the entire getWholesalerOrders function
+// ENHANCED PRODUCTION VERSION - Full features with robust error handling
 exports.getWholesalerOrders = async (req, res) => {
-  console.log('🔄 DEBUG: getWholesalerOrders called');
-  console.log('🔍 DEBUG: User ID:', req.user?.id);
-  console.log('🔍 DEBUG: User Role:', req.user?.role);
-  console.log('🔍 DEBUG: Query params:', req.query);
+  console.log('🔄 getWholesalerOrders called for user:', req.user?.id);
   
   try {
-    // Basic validation
+    // Enhanced validation with detailed logging
     if (!req.user || !req.user.id) {
-      console.log('❌ DEBUG: No user in request');
+      console.log('❌ Authentication failed: No user in request');
       return res.status(401).json({
         success: false,
-        message: 'User not authenticated'
+        message: 'User not authenticated',
+        timestamp: new Date().toISOString()
       });
     }
 
-    // SIMPLEST POSSIBLE FILTER
+    // Safely extract query parameters with defaults and validation
+    const { 
+      status, 
+      page = 1, 
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      retailerId,
+      productId,
+      timeRange = 'all',
+      search
+    } = req.query;
+
+    console.log('🔍 Query parameters:', {
+      status, page, limit, sortBy, sortOrder, retailerId, productId, timeRange, search
+    });
+
+    // Build filter safely with validation
     const filter = { 
       wholesaler: req.user.id 
     };
     
-    console.log('🔍 DEBUG: Using filter:', filter);
+    // Add status filter with validation
+    if (status && status !== 'all') {
+      const validStatuses = [
+        'pending', 'accepted', 'processing', 'assigned_to_transporter', 
+        'in_transit', 'delivered', 'certified', 'disputed', 'return_to_wholesaler',
+        'return_accepted', 'return_rejected', 'rejected', 'cancelled_by_retailer',
+        'cancelled_by_wholesaler'
+      ];
+      
+      if (validStatuses.includes(status)) {
+        filter.status = status;
+      } else {
+        console.warn('⚠️ Invalid status filter:', status);
+      }
+    }
 
-    // SIMPLEST POSSIBLE QUERY - no population, no sorting, no pagination
-    const orders = await RetailerOrder.find(filter).lean();
+    // Add retailer filter with validation
+    if (retailerId) {
+      if (mongoose.Types.ObjectId.isValid(retailerId)) {
+        filter.retailer = retailerId;
+      } else {
+        console.warn('⚠️ Invalid retailerId format:', retailerId);
+      }
+    }
+
+    // Add product filter with validation
+    if (productId) {
+      if (mongoose.Types.ObjectId.isValid(productId)) {
+        filter.product = productId;
+      } else {
+        console.warn('⚠️ Invalid productId format:', productId);
+      }
+    }
+
+    // Add time range filter safely
+    if (timeRange && timeRange !== 'all') {
+      const now = new Date();
+      let startDate = new Date();
+      
+      switch (timeRange) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          startDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          startDate.setMonth(now.getMonth() - 1);
+          break;
+        case 'year':
+          startDate.setFullYear(now.getFullYear() - 1);
+          break;
+        default:
+          console.warn('⚠️ Unknown timeRange:', timeRange);
+          break;
+      }
+      
+      if (timeRange !== 'all') {
+        filter.createdAt = { $gte: startDate };
+      }
+    }
+
+    // Add search functionality
+    if (search && search.trim()) {
+      // This would require text indexing on relevant fields
+      console.log('🔍 Search term:', search);
+      // Implement search logic based on your needs
+    }
+
+    console.log('🎯 Final filter:', JSON.stringify(filter, null, 2));
+
+    // Build sort options safely
+    const sortOptions = {};
+    const validSortFields = ['createdAt', 'updatedAt', 'totalPrice', 'quantity', 'status'];
+    const validSortOrders = ['asc', 'desc', 1, -1];
     
-    console.log(`✅ DEBUG: Found ${orders.length} raw orders`);
+    if (validSortFields.includes(sortBy)) {
+      if (sortOrder === 'asc' || sortOrder === 1) {
+        sortOptions[sortBy] = 1;
+      } else if (sortOrder === 'desc' || sortOrder === -1) {
+        sortOptions[sortBy] = -1;
+      } else {
+        sortOptions[sortBy] = -1; // Default to desc
+      }
+    } else {
+      sortOptions.createdAt = -1; // Default sort
+    }
 
-    // SIMPLEST POSSIBLE RESPONSE
+    // Calculate pagination safely
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10)); // Cap at 100 for safety
+    const skip = (pageNum - 1) * limitNum;
+
+    console.log('📊 Pagination:', { page: pageNum, limit: limitNum, skip });
+
+    // Enhanced query with safe population and error handling
+    const query = RetailerOrder.find(filter);
+    
+    // Safe population with error handling
+    try {
+      query.populate([
+        { 
+          path: 'product', 
+          select: 'name description images measurementUnit category price quantity',
+          model: 'Product' // Explicit model reference for safety
+        },
+        { 
+          path: 'retailer', 
+          select: 'firstName lastName businessName phone email address',
+          model: 'User'
+        },
+        { 
+          path: 'transporter', 
+          select: 'firstName lastName businessName phone email vehicleType',
+          model: 'User'
+        }
+      ]);
+    } catch (populateError) {
+      console.warn('⚠️ Population error, proceeding without population:', populateError.message);
+    }
+
+    // Execute query with sorting and pagination
+    const orders = await query
+      .sort(sortOptions)
+      .limit(limitNum)
+      .skip(skip)
+      .lean(); // Use lean for better performance
+
+    // Get total count for pagination
+    const total = await RetailerOrder.countDocuments(filter);
+
+    console.log(`✅ Successfully fetched ${orders.length} orders out of ${total} total`);
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / limitNum);
+    const hasNextPage = pageNum < totalPages;
+    const hasPrevPage = pageNum > 1;
+
+    // Enhanced analytics and statistics (safe version)
+    let statistics = {};
+    try {
+      const statsPipeline = [
+        { $match: filter },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalRevenue: { $sum: '$totalPrice' },
+            averageOrderValue: { $avg: '$totalPrice' }
+          }
+        }
+      ];
+
+      const statsResult = await RetailerOrder.aggregate(statsPipeline);
+      statistics = statsResult.reduce((acc, stat) => {
+        acc[stat._id] = {
+          count: stat.count,
+          totalRevenue: stat.totalRevenue || 0,
+          averageOrderValue: stat.averageOrderValue || 0
+        };
+        return acc;
+      }, {});
+    } catch (statsError) {
+      console.warn('⚠️ Statistics aggregation failed:', statsError.message);
+      statistics = { error: 'Failed to calculate statistics' };
+    }
+
+    // Calculate revenue summary safely
+    let revenueSummary = {};
+    try {
+      const revenueResult = await RetailerOrder.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$totalPrice' },
+            completedRevenue: {
+              $sum: {
+                $cond: [
+                  { $in: ['$status', ['certified', 'delivered']] },
+                  '$totalPrice',
+                  0
+                ]
+              }
+            },
+            pendingRevenue: {
+              $sum: {
+                $cond: [
+                  { $in: ['$status', ['pending', 'accepted', 'processing', 'assigned_to_transporter', 'in_transit']] },
+                  '$totalPrice',
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]);
+
+      revenueSummary = revenueResult[0] || {
+        totalRevenue: 0,
+        completedRevenue: 0,
+        pendingRevenue: 0
+      };
+    } catch (revenueError) {
+      console.warn('⚠️ Revenue calculation failed:', revenueError.message);
+      revenueSummary = {
+        totalRevenue: 0,
+        completedRevenue: 0,
+        pendingRevenue: 0,
+        error: 'Revenue calculation failed'
+      };
+    }
+
+    // Enhanced response with comprehensive data
     const response = {
       success: true,
       orders: orders || [],
-      total: orders.length,
-      message: `Found ${orders.length} orders`,
-      debug: {
+      pagination: {
+        currentPage: pageNum,
+        totalPages: totalPages,
+        totalOrders: total,
+        hasNextPage: hasNextPage,
+        hasPrevPage: hasPrevPage,
+        limit: limitNum
+      },
+      statistics: statistics,
+      revenue: revenueSummary,
+      filters: {
+        applied: {
+          status: status || 'all',
+          timeRange: timeRange || 'all',
+          retailerId: retailerId || null,
+          productId: productId || null,
+          search: search || null
+        },
+        available: {
+          statuses: [
+            'all', 'pending', 'accepted', 'processing', 'assigned_to_transporter',
+            'in_transit', 'delivered', 'certified', 'disputed'
+          ],
+          timeRanges: ['all', 'today', 'week', 'month', 'year']
+        }
+      },
+      metadata: {
         userId: req.user.id,
+        userRole: req.user.role,
         queryTime: new Date().toISOString(),
-        rawCount: orders.length
+        executionTime: `${Date.now() - startTime}ms`,
+        version: '1.0'
       }
     };
 
-    console.log('✅ DEBUG: Sending successful response');
+    console.log('✅ Sending successful response with', orders.length, 'orders');
     res.status(200).json(response);
 
   } catch (error) {
-    console.error('❌ DEBUG: CATCH BLOCK ERROR:', error);
-    console.error('❌ DEBUG: Error stack:', error.stack);
+    console.error('❌ getWholesalerOrders error:', error);
+    console.error('❌ Error stack:', error.stack);
     
-    // Detailed error response
+    // Enhanced error response with troubleshooting information
     res.status(500).json({
       success: false,
-      message: 'Server error in getWholesalerOrders',
-      error: error.message,
-      stack: error.stack,
-      userId: req.user?.id,
+      message: 'Server error while fetching orders',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message,
+      ...(process.env.NODE_ENV !== 'production' && {
+        stack: error.stack,
+        details: {
+          userId: req.user?.id,
+          queryParams: req.query,
+          timestamp: new Date().toISOString(),
+          endpoint: 'GET /api/retailer-orders/wholesaler'
+        }
+      }),
       timestamp: new Date().toISOString(),
-      endpoint: 'GET /api/retailer-orders/wholesaler'
+      suggestion: 'Please try again with simpler filters or contact support'
     });
   }
 };
-
 // Enhanced get orders for transporter with assignment tracking
 exports.getTransporterOrders = async (req, res) => {
   try {

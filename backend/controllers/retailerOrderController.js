@@ -1635,10 +1635,13 @@ exports.getRetailerOrders = async (req, res) => {
   }
 };
 
-// Enhanced get orders for wholesaler with business analytics
 
 // ENHANCED PRODUCTION VERSION - Full features with robust error handling
+
+
+// FIXED VERSION - Enhanced get orders for wholesaler with robust error handling
 exports.getWholesalerOrders = async (req, res) => {
+  const startTime = Date.now();
   console.log('🔄 getWholesalerOrders called for user:', req.user?.id);
   
   try {
@@ -1736,13 +1739,6 @@ exports.getWholesalerOrders = async (req, res) => {
       }
     }
 
-    // Add search functionality
-    if (search && search.trim()) {
-      // This would require text indexing on relevant fields
-      console.log('🔍 Search term:', search);
-      // Implement search logic based on your needs
-    }
-
     console.log('🎯 Final filter:', JSON.stringify(filter, null, 2));
 
     // Build sort options safely
@@ -1778,7 +1774,7 @@ exports.getWholesalerOrders = async (req, res) => {
         { 
           path: 'product', 
           select: 'name description images measurementUnit category price quantity',
-          model: 'Product' // Explicit model reference for safety
+          model: 'Product'
         },
         { 
           path: 'retailer', 
@@ -1800,7 +1796,7 @@ exports.getWholesalerOrders = async (req, res) => {
       .sort(sortOptions)
       .limit(limitNum)
       .skip(skip)
-      .lean(); // Use lean for better performance
+      .lean();
 
     // Get total count for pagination
     const total = await RetailerOrder.countDocuments(filter);
@@ -1811,81 +1807,6 @@ exports.getWholesalerOrders = async (req, res) => {
     const totalPages = Math.ceil(total / limitNum);
     const hasNextPage = pageNum < totalPages;
     const hasPrevPage = pageNum > 1;
-
-    // Enhanced analytics and statistics (safe version)
-    let statistics = {};
-    try {
-      const statsPipeline = [
-        { $match: filter },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 },
-            totalRevenue: { $sum: '$totalPrice' },
-            averageOrderValue: { $avg: '$totalPrice' }
-          }
-        }
-      ];
-
-      const statsResult = await RetailerOrder.aggregate(statsPipeline);
-      statistics = statsResult.reduce((acc, stat) => {
-        acc[stat._id] = {
-          count: stat.count,
-          totalRevenue: stat.totalRevenue || 0,
-          averageOrderValue: stat.averageOrderValue || 0
-        };
-        return acc;
-      }, {});
-    } catch (statsError) {
-      console.warn('⚠️ Statistics aggregation failed:', statsError.message);
-      statistics = { error: 'Failed to calculate statistics' };
-    }
-
-    // Calculate revenue summary safely
-    let revenueSummary = {};
-    try {
-      const revenueResult = await RetailerOrder.aggregate([
-        { $match: filter },
-        {
-          $group: {
-            _id: null,
-            totalRevenue: { $sum: '$totalPrice' },
-            completedRevenue: {
-              $sum: {
-                $cond: [
-                  { $in: ['$status', ['certified', 'delivered']] },
-                  '$totalPrice',
-                  0
-                ]
-              }
-            },
-            pendingRevenue: {
-              $sum: {
-                $cond: [
-                  { $in: ['$status', ['pending', 'accepted', 'processing', 'assigned_to_transporter', 'in_transit']] },
-                  '$totalPrice',
-                  0
-                ]
-              }
-            }
-          }
-        }
-      ]);
-
-      revenueSummary = revenueResult[0] || {
-        totalRevenue: 0,
-        completedRevenue: 0,
-        pendingRevenue: 0
-      };
-    } catch (revenueError) {
-      console.warn('⚠️ Revenue calculation failed:', revenueError.message);
-      revenueSummary = {
-        totalRevenue: 0,
-        completedRevenue: 0,
-        pendingRevenue: 0,
-        error: 'Revenue calculation failed'
-      };
-    }
 
     // Enhanced response with comprehensive data
     const response = {
@@ -1899,8 +1820,6 @@ exports.getWholesalerOrders = async (req, res) => {
         hasPrevPage: hasPrevPage,
         limit: limitNum
       },
-      statistics: statistics,
-      revenue: revenueSummary,
       filters: {
         applied: {
           status: status || 'all',
@@ -1908,21 +1827,13 @@ exports.getWholesalerOrders = async (req, res) => {
           retailerId: retailerId || null,
           productId: productId || null,
           search: search || null
-        },
-        available: {
-          statuses: [
-            'all', 'pending', 'accepted', 'processing', 'assigned_to_transporter',
-            'in_transit', 'delivered', 'certified', 'disputed'
-          ],
-          timeRanges: ['all', 'today', 'week', 'month', 'year']
         }
       },
       metadata: {
         userId: req.user.id,
         userRole: req.user.role,
         queryTime: new Date().toISOString(),
-        executionTime: `${Date.now() - startTime}ms`,
-        version: '1.0'
+        executionTime: `${Date.now() - startTime}ms`
       }
     };
 
@@ -1952,6 +1863,8 @@ exports.getWholesalerOrders = async (req, res) => {
     });
   }
 };
+
+
 // Enhanced get orders for transporter with assignment tracking
 exports.getTransporterOrders = async (req, res) => {
   try {

@@ -2,7 +2,6 @@ const RetailerOrder = require('../models/RetailerOrder');
 const Product = require('../models/Product');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
-const mongoose = require('mongoose');
 const { addSystemStockFromOrder } = require('./systemStockController');
 
 // ==================== ENHANCED STOCK MANAGEMENT FUNCTIONS ====================
@@ -1636,6 +1635,10 @@ exports.getRetailerOrders = async (req, res) => {
   }
 };
 
+
+// ENHANCED PRODUCTION VERSION - Full features with robust error handling
+
+
 // FIXED VERSION - Enhanced get orders for wholesaler with robust error handling
 exports.getWholesalerOrders = async (req, res) => {
   const startTime = Date.now();
@@ -1762,56 +1765,44 @@ exports.getWholesalerOrders = async (req, res) => {
 
     console.log('📊 Pagination:', { page: pageNum, limit: limitNum, skip });
 
-    // FIXED: Enhanced query with safe population and error handling
-    let orders = [];
-    let total = 0;
-
+    // Enhanced query with safe population and error handling
+    const query = RetailerOrder.find(filter);
+    
+    // Safe population with error handling
     try {
-      const query = RetailerOrder.find(filter);
-      
-      // Safe population with error handling
-      try {
-        query.populate([
-          { 
-            path: 'product', 
-            select: 'name description images measurementUnit category price quantity',
-            model: 'Product'
-          },
-          { 
-            path: 'retailer', 
-            select: 'firstName lastName businessName phone email address',
-            model: 'User'
-          },
-          { 
-            path: 'transporter', 
-            select: 'firstName lastName businessName phone email vehicleType',
-            model: 'User'
-          }
-        ]);
-      } catch (populateError) {
-        console.warn('⚠️ Population error, proceeding without population:', populateError.message);
-      }
-
-      // Execute query with sorting and pagination
-      orders = await query
-        .sort(sortOptions)
-        .limit(limitNum)
-        .skip(skip)
-        .lean();
-
-      // Get total count for pagination
-      total = await RetailerOrder.countDocuments(filter);
-
-    } catch (queryError) {
-      console.error('❌ Database query error:', queryError);
-      throw new Error(`Database error: ${queryError.message}`);
+      query.populate([
+        { 
+          path: 'product', 
+          select: 'name description images measurementUnit category price quantity',
+          model: 'Product'
+        },
+        { 
+          path: 'retailer', 
+          select: 'firstName lastName businessName phone email address',
+          model: 'User'
+        },
+        { 
+          path: 'transporter', 
+          select: 'firstName lastName businessName phone email vehicleType',
+          model: 'User'
+        }
+      ]);
+    } catch (populateError) {
+      console.warn('⚠️ Population error, proceeding without population:', populateError.message);
     }
+
+    // Execute query with sorting and pagination
+    const orders = await query
+      .sort(sortOptions)
+      .limit(limitNum)
+      .skip(skip)
+      .lean();
+
+    // Get total count for pagination
+    const total = await RetailerOrder.countDocuments(filter);
 
     console.log(`✅ Successfully fetched ${orders.length} orders out of ${total} total`);
 
-    // FIXED: Safe array operations
-    const ordersData = Array.isArray(orders) ? orders : [];
-    
     // Calculate pagination metadata
     const totalPages = Math.ceil(total / limitNum);
     const hasNextPage = pageNum < totalPages;
@@ -1820,7 +1811,7 @@ exports.getWholesalerOrders = async (req, res) => {
     // Enhanced response with comprehensive data
     const response = {
       success: true,
-      orders: ordersData,
+      orders: orders || [],
       pagination: {
         currentPage: pageNum,
         totalPages: totalPages,
@@ -1846,7 +1837,7 @@ exports.getWholesalerOrders = async (req, res) => {
       }
     };
 
-    console.log('✅ Sending successful response with', ordersData.length, 'orders');
+    console.log('✅ Sending successful response with', orders.length, 'orders');
     res.status(200).json(response);
 
   } catch (error) {
@@ -1872,6 +1863,7 @@ exports.getWholesalerOrders = async (req, res) => {
     });
   }
 };
+
 
 // Enhanced get orders for transporter with assignment tracking
 exports.getTransporterOrders = async (req, res) => {

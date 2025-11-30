@@ -231,6 +231,10 @@ const retailerOrderSchema = new mongoose.Schema({
       type: Date,
     }
   }],
+  metadata: {
+    type: Object,
+    default: {}
+  }
 }, {
   timestamps: true,
 });
@@ -256,7 +260,7 @@ retailerOrderSchema.methods.canUserPerformAction = function(userId, userRole) {
   return false;
 };
 
-// Method to get allowed status transitions based on user role
+// Method to get allowed status transitions based on user role - FIXED VERSION
 retailerOrderSchema.methods.getAllowedTransitions = function(userRole) {
   const transitions = {
     retailer: {
@@ -266,7 +270,7 @@ retailerOrderSchema.methods.getAllowedTransitions = function(userRole) {
       delivered: ['certified', 'disputed'],
     },
     wholesaler: {
-      pending: ['accepted', 'rejected'],
+      pending: ['accepted', 'rejected'], // FIXED: Added pending to accepted transition
       accepted: ['processing', 'cancelled_by_wholesaler'],
       processing: ['assigned_to_transporter', 'cancelled_by_wholesaler'],
       assigned_to_transporter: ['assigned_to_transporter'], // Allow reassignment
@@ -283,12 +287,30 @@ retailerOrderSchema.methods.getAllowedTransitions = function(userRole) {
     }
   };
 
-  return transitions[userRole][this.status] || [];
+  // Safe access with optional chaining and nullish coalescing
+  return transitions[userRole]?.[this.status] ?? [];
 };
 
-// Method to check if status transition is valid
+// Method to check if status transition is valid - ENHANCED VERSION
 retailerOrderSchema.methods.isValidTransition = function(newStatus, userRole) {
-  return this.getAllowedTransitions(userRole).includes(newStatus);
+  try {
+    const allowedTransitions = this.getAllowedTransitions(userRole);
+    
+    // Debug logging for troubleshooting
+    console.log(`🔄 Status Transition Check:`, {
+      orderId: this._id,
+      currentStatus: this.status,
+      requestedStatus: newStatus,
+      userRole: userRole,
+      allowedTransitions: allowedTransitions,
+      isValid: allowedTransitions.includes(newStatus)
+    });
+    
+    return allowedTransitions.includes(newStatus);
+  } catch (error) {
+    console.error('❌ Error checking status transition:', error);
+    return false;
+  }
 };
 
 // Method to add assignment history
@@ -322,12 +344,134 @@ retailerOrderSchema.methods.calculateTotal = function() {
   return total;
 };
 
-// Pre-save middleware to calculate total price
+// Method to get required role for action
+retailerOrderSchema.methods.getRequiredRoleForAction = function(action) {
+  const roleActions = {
+    view: ['retailer', 'wholesaler', 'transporter', 'admin'],
+    update: ['retailer', 'wholesaler', 'transporter', 'admin'],
+    delete: ['retailer', 'admin']
+  };
+  
+  return roleActions[action] || [];
+};
+
+// Enhanced pre-save middleware with better validation
 retailerOrderSchema.pre('save', function(next) {
+  // Calculate total price if relevant fields are modified
   if (this.isModified('quantity') || this.isModified('unitPrice') || this.isModified('bulkDiscount')) {
     this.calculateTotal();
   }
+  
+  // Add metadata if not present
+  if (!this.metadata) {
+    this.metadata = {};
+  }
+  
+  // Track status changes in metadata
+  if (this.isModified('status') && !this.isNew) {
+    this.metadata.lastStatusUpdate = {
+      previousStatus: this.get('originalStatus') || 'unknown',
+      newStatus: this.status,
+      changedAt: new Date()
+    };
+  }
+  
   next();
 });
 
+// Post-init to store original status for tracking changes
+retailerOrderSchema.post('init', function(doc) {
+  doc.originalStatus = doc.status;
+});
+
+// Static method to get orders by status and user
+retailerOrderSchema.statics.getOrdersByStatus = function(userId, userRole, status, options = {}) {
+  let filter = {};
+  
+  if (userRole === 'retailer') {
+    filter.retailer = userId;
+  } else if (userRole === 'wholesaler') {
+    filter.wholesaler = userId;
+  } else if (userRole === 'transporter') {
+    filter.transporter = userId;
+  }
+  
+  if (status && status !== 'all') {
+    filter.status = status;
+  }
+  
+  const { page = 1, limit = 10, sortBy = '-createdAt' } = options;
+  const skip = (page - 1) * limit;
+  
+  return this.find(filter)
+    .populate('product', 'name images measurementUnit category price')
+    .populate('retailer', 'firstName lastName businessName phone email')
+    .populate('wholesaler', 'businessName contactPerson phone email')
+    .populate('transporter', 'firstName lastName businessName phone vehicleType')
+    .sort(sortBy)
+    .limit(limit)
+    .skip(skip);
+};
+
+// Static method to get order statistics
+retailerOrderSchema.statics.getOrderStatistics = function(userId, userRole) {
+  let matchStage = {};
+  
+  if (userRole === 'retailer') {
+    matchStage.retailer = new mongoose.Types.ObjectId(userId);
+  } else if (userRole === 'wholesaler') {
+    matchStage.wholesaler = new mongoose.Types.ObjectId(userId);
+  } else if (userRole === 'transporter') {
+    matchStage.transporter = new mongoose.Types.ObjectId(userId);
+  }
+  
+  return this.aggregate([
+    { $match: matchStage },
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 },
+        totalRevenue: { $sum: '$totalPrice' },
+        averageOrderValue: { $avg: '$totalPrice' }
+      }
+    }
+  ]);
+};
+
+// Virtual for order age in days
+retailerOrderSchema.virtual('orderAgeInDays').get(function() {
+  const created = new Date(this.createdAt);
+  const now = new Date();
+  const diffTime = Math.abs(now - created);
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+});
+
+// Instance method to check if order can be cancelled
+retailerOrderSchema.methods.canBeCancelled = function(userRole) {
+  const cancellableStatuses = {
+    retailer: ['pending', 'accepted', 'processing'],
+    wholesaler: ['pending', 'accepted', 'processing'],
+    transporter: ['assigned_to_transporter', 'accepted_by_transporter']
+  };
+  
+  return cancellableStatuses[userRole]?.includes(this.status) || false;
+};
+
+// Instance method to get order summary
+retailerOrderSchema.methods.getOrderSummary = function() {
+  return {
+    orderId: this._id,
+    status: this.status,
+    product: this.product?.name || 'Unknown Product',
+    quantity: this.quantity,
+    measurementUnit: this.measurementUnit,
+    totalPrice: this.totalPrice,
+    retailer: this.retailer?.businessName || `${this.retailer?.firstName} ${this.retailer?.lastName}`,
+    wholesaler: this.wholesaler?.businessName,
+    createdAt: this.createdAt,
+    ageInDays: this.orderAgeInDays
+  };
+};
+
+// Export the model
 module.exports = mongoose.model('RetailerOrder', retailerOrderSchema);

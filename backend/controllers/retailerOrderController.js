@@ -1765,23 +1765,21 @@ exports.getWholesalerOrders = async (req, res) => {
     
     // Safe population with error handling
     try {
-      query.populate([
-        { 
-          path: 'product', 
-          select: 'name description images measurementUnit category price quantity',
-          model: 'Product'
-        },
-        { 
-          path: 'retailer', 
-          select: 'firstName lastName businessName phone email address',
-          model: 'User'
-        },
-        { 
-          path: 'transporter', 
-          select: 'firstName lastName businessName phone email vehicleType',
-          model: 'User'
-        }
-      ]);
+      query
+.populate([
+  { 
+    path: 'product', 
+    select: 'name description images measurementUnit category price quantity'
+  },
+  { 
+    path: 'retailer', 
+    select: 'firstName lastName businessName phone email address'
+  },
+  { 
+    path: 'transporter', 
+    select: 'firstName lastName businessName phone email vehicleType'
+  }
+]);
     } catch (populateError) {
       console.warn('⚠️ Population error, proceeding without population:', populateError.message);
     }

@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { addSystemStockFromOrder } = require('./systemStockController');
+const mongoose = require('mongoose');
 
 // ==================== ENHANCED STOCK MANAGEMENT FUNCTIONS ====================
 
@@ -363,12 +364,11 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Enhanced permission check with detailed information
+    // Enhanced permission check with detailed information - FIXED: Removed non-existent method call
     if (!order.canUserPerformAction(req.user.id, req.user.role)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this order',
-        requiredRole: order.getRequiredRoleForAction('update'),
         userRole: req.user.role,
         orderStatus: order.status,
         timestamp: new Date()
@@ -1333,7 +1333,7 @@ exports.createOrder = async (req, res) => {
     console.log('🔔 Creating notification for wholesaler:', productDetails.wholesaler._id);
 
     // Enhanced notification with more details
-    const notification = new Notification({
+    const notification = await Notification.create({
       user: productDetails.wholesaler._id,
       type: 'new_order',
       title: 'New Order Received! 🛒',
@@ -1359,7 +1359,6 @@ exports.createOrder = async (req, res) => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // Expire in 7 days
     });
 
-    await notification.save();
     console.log('✅ Notification saved:', notification._id);
 
     // Enhanced real-time notification system with retry logic
@@ -1635,10 +1634,6 @@ exports.getRetailerOrders = async (req, res) => {
   }
 };
 
-
-// ENHANCED PRODUCTION VERSION - Full features with robust error handling
-
-
 // FIXED VERSION - Enhanced get orders for wholesaler with robust error handling
 exports.getWholesalerOrders = async (req, res) => {
   const startTime = Date.now();
@@ -1864,7 +1859,6 @@ exports.getWholesalerOrders = async (req, res) => {
   }
 };
 
-
 // Enhanced get orders for transporter with assignment tracking
 exports.getTransporterOrders = async (req, res) => {
   try {
@@ -2036,13 +2030,12 @@ exports.getOrder = async (req, res) => {
       });
     }
 
-    // Enhanced permission check
+    // Enhanced permission check - FIXED: Removed non-existent method call
     if (!order.canUserPerformAction(req.user.id, req.user.role) && 
         req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view this order',
-        requiredRole: order.getRequiredRoleForAction('view'),
         userRole: req.user.role,
         timestamp: new Date()
       });

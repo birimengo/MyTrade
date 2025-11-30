@@ -231,6 +231,11 @@ const retailerOrderSchema = new mongoose.Schema({
       type: Date,
     }
   }],
+  // Enhanced metadata field for additional data
+  metadata: {
+    type: Object,
+    default: {}
+  }
 }, {
   timestamps: true,
 });
@@ -242,8 +247,14 @@ retailerOrderSchema.index({ transporter: 1, status: 1 });
 retailerOrderSchema.index({ product: 1 });
 retailerOrderSchema.index({ status: 1 });
 
+// ==================== CRITICAL MISSING METHODS - ADDED BACK ====================
+
 // Method to check if user can perform action on order
 retailerOrderSchema.methods.canUserPerformAction = function(userId, userRole) {
+  if (userRole === 'admin') {
+    return true;
+  }
+  
   if (userRole === 'retailer') {
     return this.retailer.toString() === userId;
   } else if (userRole === 'wholesaler') {
@@ -283,12 +294,13 @@ retailerOrderSchema.methods.getAllowedTransitions = function(userRole) {
     }
   };
 
-  return transitions[userRole][this.status] || [];
+  return transitions[userRole]?.[this.status] || [];
 };
 
 // Method to check if status transition is valid
 retailerOrderSchema.methods.isValidTransition = function(newStatus, userRole) {
-  return this.getAllowedTransitions(userRole).includes(newStatus);
+  const allowedTransitions = this.getAllowedTransitions(userRole);
+  return allowedTransitions.includes(newStatus);
 };
 
 // Method to add assignment history
@@ -298,7 +310,7 @@ retailerOrderSchema.methods.addAssignmentHistory = function(transporterId, assig
     assignmentType,
     status,
     reason,
-    expiredAt
+    expiredAt: expiredAt || new Date(Date.now() + 24 * 60 * 60 * 1000) // Default 24 hours expiry
   });
 };
 
@@ -322,12 +334,219 @@ retailerOrderSchema.methods.calculateTotal = function() {
   return total;
 };
 
+// Enhanced method to get order timeline
+retailerOrderSchema.methods.generateTimeline = function() {
+  const timeline = [];
+  
+  // Order creation
+  timeline.push({
+    event: 'order_created',
+    timestamp: this.createdAt,
+    description: 'Order placed by retailer',
+    user: this.retailer,
+    status: 'pending'
+  });
+
+  // Status changes
+  if (this.updatedAt && this.updatedAt !== this.createdAt) {
+    timeline.push({
+      event: 'status_updated',
+      timestamp: this.updatedAt,
+      description: `Status changed to ${this.status}`,
+      status: this.status
+    });
+  }
+
+  // Assignment history
+  if (this.assignmentHistory && this.assignmentHistory.length > 0) {
+    this.assignmentHistory.forEach(assignment => {
+      timeline.push({
+        event: `transporter_${assignment.status}`,
+        timestamp: assignment.assignedAt,
+        description: `Order ${assignment.status} by transporter`,
+        assignmentType: assignment.assignmentType,
+        reason: assignment.reason
+      });
+    });
+  }
+
+  // Cancellation events
+  if (this.cancellationDetails) {
+    timeline.push({
+      event: 'order_cancelled',
+      timestamp: this.cancellationDetails.cancelledAt,
+      description: `Order cancelled: ${this.cancellationDetails.reason}`,
+      user: this.cancellationDetails.cancelledBy,
+      previousStatus: this.cancellationDetails.previousStatus
+    });
+  }
+
+  // Delivery events
+  if (this.actualDeliveryDate) {
+    timeline.push({
+      event: 'order_delivered',
+      timestamp: this.actualDeliveryDate,
+      description: 'Order delivered to retailer',
+      user: this.transporter
+    });
+  }
+
+  // Certification events
+  if (this.deliveryCertificationDate) {
+    timeline.push({
+      event: 'order_certified',
+      timestamp: this.deliveryCertificationDate,
+      description: 'Order certified by retailer'
+    });
+  }
+
+  // Dispute events
+  if (this.deliveryDispute) {
+    timeline.push({
+      event: 'order_disputed',
+      timestamp: this.deliveryDispute.disputedAt,
+      description: `Order disputed: ${this.deliveryDispute.reason}`,
+      user: this.deliveryDispute.disputedBy
+    });
+
+    if (this.deliveryDispute.resolvedAt) {
+      timeline.push({
+        event: 'dispute_resolved',
+        timestamp: this.deliveryDispute.resolvedAt,
+        description: `Dispute resolved: ${this.deliveryDispute.resolutionNotes}`,
+        user: this.deliveryDispute.resolvedBy
+      });
+    }
+  }
+
+  // Return events
+  if (this.returnDetails) {
+    if (this.returnDetails.returnRequestedAt) {
+      timeline.push({
+        event: 'return_requested',
+        timestamp: this.returnDetails.returnRequestedAt,
+        description: `Return requested: ${this.returnDetails.returnReason}`,
+        user: this.returnDetails.returnedBy
+      });
+    }
+
+    if (this.returnDetails.returnAcceptedAt) {
+      timeline.push({
+        event: 'return_accepted',
+        timestamp: this.returnDetails.returnAcceptedAt,
+        description: 'Return accepted by wholesaler',
+        user: this.returnDetails.handledBy
+      });
+    }
+
+    if (this.returnDetails.returnRejectedAt) {
+      timeline.push({
+        event: 'return_rejected',
+        timestamp: this.returnDetails.returnRejectedAt,
+        description: `Return rejected: ${this.returnDetails.returnRejectionReason}`,
+        user: this.returnDetails.handledBy
+      });
+    }
+  }
+
+  // Sort timeline by timestamp
+  return timeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+};
+
+// Enhanced method to check if assignment is expired
+retailerOrderSchema.methods.isAssignmentExpired = function() {
+  const lastAssignment = this.getLastAssignment();
+  if (!lastAssignment || !lastAssignment.expiredAt) return false;
+  
+  return new Date() > new Date(lastAssignment.expiredAt);
+};
+
+// Enhanced method to get current assignment status
+retailerOrderSchema.methods.getAssignmentStatus = function() {
+  if (this.status !== 'assigned_to_transporter') return null;
+  
+  const lastAssignment = this.getLastAssignment();
+  if (!lastAssignment) return 'Not assigned';
+  
+  if (this.isAssignmentExpired()) {
+    return 'Assignment expired - needs re-assignment';
+  }
+  
+  if (lastAssignment.assignmentType === 'free') {
+    return 'Waiting for any transporter to accept';
+  }
+  
+  return `Assigned to specific transporter - ${lastAssignment.status}`;
+};
+
 // Pre-save middleware to calculate total price
 retailerOrderSchema.pre('save', function(next) {
   if (this.isModified('quantity') || this.isModified('unitPrice') || this.isModified('bulkDiscount')) {
     this.calculateTotal();
   }
+  
+  // Enhanced: Update metadata on status changes
+  if (this.isModified('status')) {
+    this.metadata = this.metadata || {};
+    this.metadata.lastStatusUpdate = {
+      previousStatus: this._previousStatus,
+      newStatus: this.status,
+      changedAt: new Date()
+    };
+    this._previousStatus = this.status;
+  }
+  
   next();
 });
+
+// Enhanced static methods for analytics
+retailerOrderSchema.statics.getOrderStatistics = async function(userId, userRole, timeRange = 'month') {
+  let filter = {};
+  if (userRole === 'retailer') {
+    filter.retailer = userId;
+  } else if (userRole === 'wholesaler') {
+    filter.wholesaler = userId;
+  } else if (userRole === 'transporter') {
+    filter.transporter = userId;
+  }
+
+  // Time range filtering
+  const now = new Date();
+  let startDate = new Date();
+  
+  switch (timeRange) {
+    case 'today':
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'week':
+      startDate.setDate(now.getDate() - 7);
+      break;
+    case 'month':
+      startDate.setMonth(now.getMonth() - 1);
+      break;
+    case 'year':
+      startDate.setFullYear(now.getFullYear() - 1);
+      break;
+    default:
+      startDate = new Date(0);
+  }
+  
+  if (timeRange !== 'all') {
+    filter.createdAt = { $gte: startDate };
+  }
+
+  return await this.aggregate([
+    { $match: filter },
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 },
+        totalRevenue: { $sum: '$totalPrice' },
+        averageOrderValue: { $avg: '$totalPrice' },
+        totalQuantity: { $sum: '$quantity' }
+      }
+    }
+  ]);
+};
 
 module.exports = mongoose.model('RetailerOrder', retailerOrderSchema);

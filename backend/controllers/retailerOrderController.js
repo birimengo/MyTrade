@@ -329,12 +329,19 @@ exports.restoreProductStock = async (order) => {
 
 // ==================== ENHANCED ORDER STATUS MANAGEMENT ====================
 
+
+// ==================== ENHANCED ORDER STATUS MANAGEMENT ====================
+
 /**
  * Enhanced update order status with comprehensive stock management and graceful error handling
- * FIXED VERSION with robust stock operations and detailed logging
+ * COMPLETE FIXED VERSION with model method integration
  */
 exports.updateOrderStatus = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
+    const { id } = req.params;
     const { 
       status, 
       cancellationReason, 
@@ -342,39 +349,47 @@ exports.updateOrderStatus = async (req, res) => {
       assignmentType, 
       disputeReason, 
       returnReason,
-      notes 
+      notes,
+      resolutionNotes,
+      compensationAmount,
+      resolutionType
     } = req.body;
 
     console.log(`🔄 Enhanced order status update initiated:`, {
-      orderId: req.params.id,
+      orderId: id,
       newStatus: status,
       userId: req.user.id,
       userRole: req.user.role,
       timestamp: new Date()
     });
 
-    const order = await RetailerOrder.findById(req.params.id);
+    // Find order with enhanced population
+    const order = await RetailerOrder.findById(id)
+      .populate('product', 'name quantity measurementUnit lowStockAlert lowStockThreshold')
+      .populate('retailer', 'firstName lastName businessName phone email')
+      .populate('wholesaler', 'businessName contactPerson phone email')
+      .populate('transporter', 'firstName lastName businessName phone vehicleType')
+      .session(session);
+
     if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(404).json({
         success: false,
         message: 'Order not found',
-        orderId: req.params.id,
+        orderId: id,
         timestamp: new Date()
       });
     }
 
-    // FIXED: Direct permission check implementation
-    let hasPermission = false;
-    if (req.user.role === 'retailer') {
-      hasPermission = order.retailer.toString() === req.user.id;
-    } else if (req.user.role === 'wholesaler') {
-      hasPermission = order.wholesaler.toString() === req.user.id;
-    } else if (req.user.role === 'transporter') {
-      hasPermission = (order.transporter && order.transporter.toString() === req.user.id) || 
-                     (!order.transporter && order.status === 'assigned_to_transporter');
-    }
-
+    // ENHANCED: Use model method for permission check
+    const hasPermission = order.canUserPerformAction(req.user.id, req.user.role);
+    
     if (!hasPermission && req.user.role !== 'admin') {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this order',
@@ -384,40 +399,20 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    // FIXED: Direct status transition validation
-    const allowedTransitions = {
-      retailer: {
-        pending: ['cancelled_by_retailer'],
-        accepted: ['cancelled_by_retailer'],
-        processing: ['cancelled_by_retailer'],
-        delivered: ['certified', 'disputed'],
-      },
-      wholesaler: {
-        pending: ['accepted', 'rejected'],
-        accepted: ['processing', 'cancelled_by_wholesaler'],
-        processing: ['assigned_to_transporter', 'cancelled_by_wholesaler'],
-        assigned_to_transporter: ['assigned_to_transporter'],
-        rejected_by_transporter: ['assigned_to_transporter'],
-        cancelled_by_transporter: ['assigned_to_transporter'],
-        disputed: ['assigned_to_transporter'],
-        return_to_wholesaler: ['return_accepted', 'return_rejected'],
-      },
-      transporter: {
-        assigned_to_transporter: ['accepted_by_transporter', 'rejected_by_transporter', 'cancelled_by_transporter'],
-        accepted_by_transporter: ['in_transit', 'cancelled_by_transporter'],
-        in_transit: ['delivered', 'cancelled_by_transporter'],
-        disputed: ['return_to_wholesaler'],
-      }
-    };
+    // ENHANCED: Use model method for status transition validation
+    const isValidTransition = order.isValidTransition(status, req.user.role);
+    const allowedTransitions = order.getAllowedTransitions(req.user.role);
 
-    const userAllowedTransitions = allowedTransitions[req.user.role]?.[order.status] || [];
-    if (!userAllowedTransitions.includes(status)) {
+    if (!isValidTransition) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
         message: `Invalid status transition from ${order.status} to ${status} for ${req.user.role}`,
         currentStatus: order.status,
         requestedStatus: status,
-        allowedTransitions: userAllowedTransitions,
+        allowedTransitions: allowedTransitions,
         userRole: req.user.role,
         timestamp: new Date()
       });
@@ -433,15 +428,18 @@ exports.updateOrderStatus = async (req, res) => {
       userRole: req.user.role
     };
 
-    console.log(`📋 Order status transition: ${previousStatus} → ${status}`);
+    console.log(`📋 Order status transition: ${previousStatus} → ${status} by ${req.user.role}`);
 
-    // Handle delivery certification by retailer
+    // ==================== STATUS-SPECIFIC HANDLING ====================
+
+    // Handle delivery certification by retailer - STOCK UPDATE
     if (status === 'certified') {
       console.log(`🏁 Processing enhanced order certification for: ${order._id}`);
       
       order.deliveryCertificationDate = new Date();
       order.paymentStatus = 'paid';
       
+      // Enhanced product stock quantity update
       try {
         console.log(`📦 Starting enhanced stock update for certification of order: ${order._id}`);
         
@@ -450,7 +448,7 @@ exports.updateOrderStatus = async (req, res) => {
         if (stockUpdateResult.success) {
           console.log(`✅ Enhanced stock update successful for certified order:`, {
             orderId: order._id,
-            productId: order.product,
+            productId: order.product?._id,
             productName: stockUpdateResult.product?.name,
             quantityReduced: order.quantity,
             previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
@@ -459,6 +457,7 @@ exports.updateOrderStatus = async (req, res) => {
             remainingStock: stockUpdateResult.remainingStock
           });
 
+          // Enhanced stock update metadata
           order.metadata = order.metadata || {};
           order.metadata.stockUpdate = {
             previousStock: stockUpdateResult.stockUpdate?.previousQuantity,
@@ -476,9 +475,10 @@ exports.updateOrderStatus = async (req, res) => {
           console.warn(`⚠️ Stock update failed but order certification proceeding with graceful degradation:`, {
             error: stockUpdateResult.error,
             orderId: order._id,
-            productId: order.product
+            productId: order.product?._id
           });
           
+          // Continue with certification even if stock update fails
           order.metadata = order.metadata || {};
           order.metadata.stockUpdate = {
             success: false,
@@ -493,6 +493,7 @@ exports.updateOrderStatus = async (req, res) => {
       } catch (stockError) {
         console.error('❌ Unexpected error during enhanced stock update process:', stockError);
         
+        // Continue with order certification even if stock update fails completely
         order.metadata = order.metadata || {};
         order.metadata.stockUpdate = {
           success: false,
@@ -504,13 +505,16 @@ exports.updateOrderStatus = async (req, res) => {
         };
       }
       
+      // Enhanced system stock addition
       try {
         await addSystemStockFromOrder(order);
         console.log(`✅ Enhanced system stock updated for order: ${order._id}`);
       } catch (systemStockError) {
         console.error('⚠️ Enhanced system stock update failed:', systemStockError);
+        // Continue with order update - system stock is secondary
       }
 
+      // Enhanced notification for certification
       const certificationNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
@@ -535,9 +539,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for certification
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+        io.to(`user_${order.retailer._id.toString()}`).emit('order_status_update', {
           orderId: order._id,
           status: 'certified',
           previousStatus: previousStatus,
@@ -551,22 +556,25 @@ exports.updateOrderStatus = async (req, res) => {
       console.log(`🎉 Order ${order._id} certified successfully with enhanced stock update status: ${order.metadata?.stockUpdate?.success}`);
     }
 
-    // Handle return acceptance by wholesaler
+    // Handle return acceptance by wholesaler - STOCK RESTORATION
     if (status === 'return_accepted') {
       console.log(`🔄 Processing enhanced stock restoration for return acceptance: ${order._id}`);
       
       order.returnDetails = order.returnDetails || {};
       order.returnDetails.returnAcceptedAt = new Date();
       order.returnDetails.returnCompletedAt = new Date();
+      order.returnDetails.handledBy = req.user.id;
+      order.returnDetails.returnNotes = notes;
       order.paymentStatus = 'refunded';
       
+      // Enhanced product stock restoration when return is accepted
       try {
         const stockRestoreResult = await this.restoreProductStock(order);
         
         if (stockRestoreResult.success) {
           console.log(`✅ Enhanced stock restoration successful for returned order:`, {
             orderId: order._id,
-            productId: order.product,
+            productId: order.product?._id,
             productName: stockRestoreResult.product?.name,
             quantityRestored: order.quantity,
             previousStock: stockRestoreResult.stockUpdate?.previousQuantity,
@@ -574,6 +582,7 @@ exports.updateOrderStatus = async (req, res) => {
             lowStockAlert: stockRestoreResult.lowStockAlert
           });
 
+          // Enhanced stock restoration metadata
           order.metadata = order.metadata || {};
           order.metadata.stockRestoration = {
             previousStock: stockRestoreResult.stockUpdate?.previousQuantity,
@@ -600,6 +609,7 @@ exports.updateOrderStatus = async (req, res) => {
         
       } catch (stockError) {
         console.error('❌ Enhanced error restoring product stock during return:', stockError);
+        // Continue with return processing even if stock update fails
         order.metadata = order.metadata || {};
         order.metadata.stockRestoration = {
           success: false,
@@ -610,6 +620,7 @@ exports.updateOrderStatus = async (req, res) => {
         };
       }
 
+      // Enhanced return acceptance notification
       const returnAcceptNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
@@ -627,9 +638,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for return acceptance
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+        io.to(`user_${order.retailer._id.toString()}`).emit('order_status_update', {
           orderId: order._id,
           status: 'return_accepted',
           refundAmount: order.totalPrice,
@@ -641,7 +653,7 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Handle other status updates
+    // Handle cancellation/rejection by transporter
     if ((status === 'rejected_by_transporter' || status === 'cancelled_by_transporter') && cancellationReason) {
       order.cancellationDetails = {
         cancelledBy: req.user.id,
@@ -651,22 +663,22 @@ exports.updateOrderStatus = async (req, res) => {
         userRole: req.user.role
       };
       
-      // FIXED: Direct assignment history method
+      // ENHANCED: Use model method for assignment history
       if (order.transporter) {
-        if (!order.assignmentHistory) order.assignmentHistory = [];
-        order.assignmentHistory.push({
-          transporter: order.transporter,
-          assignedAt: new Date(),
-          assignmentType: order.assignmentHistory.length > 0 ? order.assignmentHistory[order.assignmentHistory.length - 1].assignmentType : 'specific',
-          status: status === 'rejected_by_transporter' ? 'rejected' : 'cancelled',
-          reason: cancellationReason,
-          expiredAt: new Date(Date.now() + 30 * 60 * 1000)
-        });
+        order.addAssignmentHistory(
+          order.transporter,
+          order.assignmentHistory.length > 0 ? order.getLastAssignment().assignmentType : 'specific',
+          status === 'rejected_by_transporter' ? 'rejected' : 'cancelled',
+          cancellationReason,
+          new Date(Date.now() + 30 * 60 * 1000)
+        );
       }
       
+      // Clear transporter for reassignment
       order.transporter = null;
     }
 
+    // Handle delivery dispute by retailer
     if (status === 'disputed' && disputeReason) {
       order.deliveryDispute = {
         disputedBy: req.user.id,
@@ -676,6 +688,7 @@ exports.updateOrderStatus = async (req, res) => {
         userRole: req.user.role
       };
 
+      // Enhanced dispute notification
       const disputeNotification = await Notification.create({
         user: order.wholesaler,
         type: 'order_disputed',
@@ -693,9 +706,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for dispute
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.wholesaler.toString()}`).emit('order_disputed', {
+        io.to(`user_${order.wholesaler._id.toString()}`).emit('order_disputed', {
           orderId: order._id,
           disputeReason: disputeReason,
           retailer: order.retailer,
@@ -705,6 +719,7 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Handle return to wholesaler by transporter
     if (status === 'return_to_wholesaler' && returnReason) {
       order.returnDetails = {
         returnedBy: req.user.id,
@@ -715,6 +730,7 @@ exports.updateOrderStatus = async (req, res) => {
       order.returnRequestedAt = new Date();
       order.returnReason = returnReason;
 
+      // Enhanced return notification
       const returnNotification = await Notification.create({
         user: order.wholesaler,
         type: 'order_return',
@@ -731,9 +747,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for return request
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.wholesaler.toString()}`).emit('order_return', {
+        io.to(`user_${order.wholesaler._id.toString()}`).emit('order_return', {
           orderId: order._id,
           returnReason: returnReason,
           transporter: order.transporter,
@@ -743,11 +760,14 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Handle return rejection by wholesaler
     if (status === 'return_rejected') {
       if (!order.returnDetails) order.returnDetails = {};
       order.returnDetails.returnRejectedAt = new Date();
       order.returnDetails.returnRejectionReason = returnReason;
+      order.returnDetails.handledBy = req.user.id;
 
+      // Enhanced return rejection notification
       const returnRejectNotification = await Notification.create({
         user: order.retailer,
         type: 'order_status_update',
@@ -763,9 +783,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for return rejection
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+        io.to(`user_${order.retailer._id.toString()}`).emit('order_status_update', {
           orderId: order._id,
           status: 'return_rejected',
           rejectionReason: returnReason,
@@ -775,8 +796,10 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Handle reassignment by wholesaler
     if (status === 'assigned_to_transporter' && 
         (order.status === 'rejected_by_transporter' || order.status === 'cancelled_by_transporter' || order.status === 'disputed' || order.status === 'return_rejected')) {
+      // Clear previous cancellation/dispute/return details for reassignment
       order.cancellationDetails = undefined;
       order.deliveryDispute = undefined;
       order.returnDetails = undefined;
@@ -784,7 +807,24 @@ exports.updateOrderStatus = async (req, res) => {
       order.returnRequestedAt = undefined;
     }
 
-    // Update order status
+    // Handle dispute resolution (for dispute resolution endpoint compatibility)
+    if (status === 'assigned_to_transporter' && resolutionNotes) {
+      if (order.deliveryDispute) {
+        order.deliveryDispute.resolved = true;
+        order.deliveryDispute.resolvedAt = new Date();
+        order.deliveryDispute.resolutionNotes = resolutionNotes;
+        order.deliveryDispute.resolvedBy = req.user.id;
+        
+        if (compensationAmount) {
+          order.deliveryDispute.compensationAmount = compensationAmount;
+        }
+        if (resolutionType) {
+          order.deliveryDispute.resolutionType = resolutionType;
+        }
+      }
+    }
+
+    // ==================== CORE STATUS UPDATE ====================
     order.status = status;
     order.metadata = order.metadata || {};
     order.metadata.lastStatusUpdate = updateMetadata;
@@ -794,18 +834,17 @@ exports.updateOrderStatus = async (req, res) => {
         (status === 'accepted_by_transporter' && req.user.role === 'transporter')) {
       order.transporter = transporterId || req.user.id;
       
+      // Enhanced assignment history for new assignments
       if (status === 'assigned_to_transporter') {
-        // FIXED: Direct assignment history method
-        if (!order.assignmentHistory) order.assignmentHistory = [];
-        order.assignmentHistory.push({
-          transporter: transporterId || null,
-          assignedAt: new Date(),
-          assignmentType: assignmentType || 'specific',
-          status: 'assigned',
-          reason: `Order assigned by ${req.user.role}`,
-          expiredAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
+        order.addAssignmentHistory(
+          transporterId || null,
+          assignmentType || 'specific',
+          'assigned',
+          `Order assigned by ${req.user.role}`,
+          new Date(Date.now() + 24 * 60 * 60 * 1000)
+        );
 
+        // Enhanced assignment notification
         if (transporterId) {
           const assignmentNotification = await Notification.create({
             user: transporterId,
@@ -826,6 +865,7 @@ exports.updateOrderStatus = async (req, res) => {
             expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000)
           });
 
+          // Enhanced real-time notification for order assignment
           if (req.app.get('socketio')) {
             const io = req.app.get('socketio');
             io.to(`user_${transporterId.toString()}`).emit('order_assigned', {
@@ -843,9 +883,11 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
     
+    // Enhanced delivery tracking
     if (status === 'delivered') {
       order.actualDeliveryDate = new Date();
 
+      // Enhanced delivery notification
       const deliveryNotification = await Notification.create({
         user: order.retailer,
         type: 'order_delivered',
@@ -863,9 +905,10 @@ exports.updateOrderStatus = async (req, res) => {
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
       });
 
+      // Enhanced real-time notification for delivery
       if (req.app.get('socketio')) {
         const io = req.app.get('socketio');
-        io.to(`user_${order.retailer.toString()}`).emit('order_delivered', {
+        io.to(`user_${order.retailer._id.toString()}`).emit('order_delivered', {
           orderId: order._id,
           productName: order.product?.name,
           quantity: order.quantity,
@@ -876,7 +919,7 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Enhanced status update notifications
+    // Enhanced status update notifications for workflow steps
     if (['accepted', 'processing', 'in_transit'].includes(status)) {
       let notificationMessage = '';
       let notificationTitle = '';
@@ -913,9 +956,10 @@ exports.updateOrderStatus = async (req, res) => {
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
         });
 
+        // Enhanced real-time notification for status updates
         if (req.app.get('socketio')) {
           const io = req.app.get('socketio');
-          io.to(`user_${order.retailer.toString()}`).emit('order_status_update', {
+          io.to(`user_${order.retailer._id.toString()}`).emit('order_status_update', {
             orderId: order._id,
             status: status,
             previousStatus: previousStatus,
@@ -927,9 +971,14 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    await order.save();
+    // Save order within transaction
+    await order.save({ session });
 
-    // Enhanced order population
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    // Enhanced order population after save
     await order.populate([
       { 
         path: 'product', 
@@ -944,6 +993,10 @@ exports.updateOrderStatus = async (req, res) => {
         select: 'firstName lastName businessName phone email vehicleType rating' 
       },
       { 
+        path: 'wholesaler', 
+        select: 'businessName contactPerson phone email address' 
+      },
+      { 
         path: 'cancellationDetails.cancelledBy', 
         select: 'firstName lastName businessName' 
       },
@@ -952,7 +1005,15 @@ exports.updateOrderStatus = async (req, res) => {
         select: 'firstName lastName businessName' 
       },
       { 
+        path: 'deliveryDispute.resolvedBy', 
+        select: 'firstName lastName businessName' 
+      },
+      { 
         path: 'returnDetails.returnedBy', 
+        select: 'firstName lastName businessName' 
+      },
+      { 
+        path: 'returnDetails.handledBy', 
         select: 'firstName lastName businessName' 
       },
       { 
@@ -976,17 +1037,23 @@ exports.updateOrderStatus = async (req, res) => {
         requiresManualIntervention: {
           stockUpdate: order.metadata?.stockUpdate?.requiresManualIntervention || false,
           stockRestoration: order.metadata?.stockRestoration?.requiresManualIntervention || false
-        }
+        },
+        workflowStep: this.getWorkflowStepDescription(status)
       },
       metadata: {
         notificationSent: true,
         socketEmitted: !!req.app.get('socketio'),
         timestamp: new Date(),
-        userRole: req.user.role
+        userRole: req.user.role,
+        nextAllowedActions: order.getAllowedTransitions(req.user.role)
       }
     });
 
   } catch (error) {
+    // Rollback transaction on error
+    await session.abortTransaction();
+    session.endSession();
+    
     console.error('❌ Enhanced update order status error:', error);
     res.status(500).json({
       success: false,
@@ -998,6 +1065,30 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
+// Helper function for workflow step descriptions
+exports.getWorkflowStepDescription = (status) => {
+  const descriptions = {
+    pending: 'Order placed, waiting for wholesaler acceptance',
+    accepted: 'Order accepted by wholesaler',
+    rejected: 'Order rejected by wholesaler',
+    processing: 'Order being processed by wholesaler',
+    assigned_to_transporter: 'Order assigned to transporter',
+    accepted_by_transporter: 'Order accepted by transporter',
+    in_transit: 'Order in transit to retailer',
+    delivered: 'Order delivered to retailer',
+    certified: 'Order certified and completed by retailer',
+    disputed: 'Order disputed by retailer',
+    return_to_wholesaler: 'Order being returned to wholesaler',
+    return_accepted: 'Return accepted by wholesaler',
+    return_rejected: 'Return rejected by wholesaler',
+    cancelled_by_retailer: 'Order cancelled by retailer',
+    cancelled_by_wholesaler: 'Order cancelled by wholesaler',
+    rejected_by_transporter: 'Order rejected by transporter',
+    cancelled_by_transporter: 'Order cancelled by transporter'
+  };
+  
+  return descriptions[status] || 'Unknown status';
+};
 
 // ==================== ENHANCED DEBUG AND VERIFICATION FUNCTIONS ====================
 
